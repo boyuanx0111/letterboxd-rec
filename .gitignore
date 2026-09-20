@@ -217,5 +217,8 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-data/ml-32m/
+
 Miniconda3-latest-Windows-x86_64.exe
+
+#data files
+data/

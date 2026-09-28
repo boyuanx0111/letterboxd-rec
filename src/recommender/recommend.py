@@ -79,45 +79,79 @@ def recommend_movies(X_user, top_n, watched_movie_ids):
     # Return the top N movies
     return results.head(top_n)
 
-#Test with temp user
-#Prediction
-test_user = pd.read_csv("data/test_user.csv")
 
-#manually set now, but will be parsed auto from use input
-watched_movie_ids = [7460, 2141, 2908, 185, 36, 2064, 165, 44889, 2009, 2959, 2174, 337, 1094, 1271, 1193, 4993, 3157, 30793, 50872, 48593, 788, 2710, 2137, 2291, 1411, 917, 2746, 364, 1073, 971, 2080, 24, 5218, 1994, 55442, 141, 208, 5816, 480, 47099, 2761, 150, 1232, 1345, 473, 8360, 5617, 4896, 2138, 6881, 45208, 1721, 3793, 5445, 1307, 1097, 1380, 2362, 2161, 318, 53894, 2123, 8228, 587, 2139, 38600, 6502, 2082, 2081, 1037, 4017, 1409, 47999, 3418, 442, 3969, 5308, 56152, 1240, 586, 37240, 5669, 56782, 1923, 53121, 1270, 1682, 48394, 594, 2142, 1015, 34, 48780, 45431, 508, 203, 235, 2617, 377, 2871, 597, 2085, 2399, 1393, 4306, 2797, 1265, 1206, 454, 56757, 2571, 593, 1921, 4326, 344, 750, 1282, 3243, 8950, 356, 50, 4878, 4027, 1214, 3844, 19, 2762, 509, 3147, 1033, 223, 919, 7153, 3401, 62, 2313, 1028, 253, 410, 3504, 2804, 589, 4018, 26680, 902, 1276, 6934, 2140, 968, 45210, 1784, 1291, 7361, 380, 3672, 6539, 55814, 5505, 1997, 1198, 1231, 4039, 49932, 231, 588, 1012, 296, 4935, 592, 37729, 8582, 26258, 266, 48696, 6373, 923, 6909, 45928, 2297, 45517, 5444, 44761, 65, 247, 714, 4963, 104, 7020, 4973, 54259, 56367, 2431, 3676, 317, 1207, 95, 56171, 542, 110, 367, 3863, 912, 2076, 2455, 2000, 48414, 783, 780, 8507, 590, 8784, 1259, 45720, 1104, 5958, 31, 5992, 59615, 2067, 6223, 3949, 3751, 1580, 1258, 2115, 52328, 595, 53460, 551, 56174, 1968, 2683, 1151, 6365, 8622, 2028, 8464, 520, 56915, 5349, 1199, 6222, 4008, 2987, 1036, 48698, 55820, 6291, 8961, 2087, 48, 920, 2502, 1021, 3186, 58299, 1032, 3108, 153, 1022, 1029, 3034, 260, 3107, 1, 1961, 4226, 2858, 233, 539, 54272, 6377, 596, 2054, 497, 1298, 55999, 2916, 1441, 2716, 4995, 1620, 3798, 491, 527, 1196, 2846]
-recommendations = recommend_movies(test_user, 20, watched_movie_ids)
-print("Recommendations: \n", recommendations)
 
-#Previous
-ratings = pd.read_csv("data/ml-32m/ratings.csv")
 
-user_ratings = ratings[
-    ratings["userId"] == 103752 #test_user_id from 03. 32M-MovieLens_exploration.ipynb
+# #Test with temp user
+# #Prediction
+# test_user = pd.read_csv("data/test_user.csv")
+
+# #manually set now, but will be parsed auto from user input
+# watched_movie_ids = [7460, 2141, 2908, 185, 36, 2064, 165, 44889, 2009, 2959, 2174, 337, 1094, 1271, 1193, 4993, 3157, 30793, 50872, 48593, 788, 2710, 2137, 2291, 1411, 917, 2746, 364, 1073, 971, 2080, 24, 5218, 1994, 55442, 141, 208, 5816, 480, 47099, 2761, 150, 1232, 1345, 473, 8360, 5617, 4896, 2138, 6881, 45208, 1721, 3793, 5445, 1307, 1097, 1380, 2362, 2161, 318, 53894, 2123, 8228, 587, 2139, 38600, 6502, 2082, 2081, 1037, 4017, 1409, 47999, 3418, 442, 3969, 5308, 56152, 1240, 586, 37240, 5669, 56782, 1923, 53121, 1270, 1682, 48394, 594, 2142, 1015, 34, 48780, 45431, 508, 203, 235, 2617, 377, 2871, 597, 2085, 2399, 1393, 4306, 2797, 1265, 1206, 454, 56757, 2571, 593, 1921, 4326, 344, 750, 1282, 3243, 8950, 356, 50, 4878, 4027, 1214, 3844, 19, 2762, 509, 3147, 1033, 223, 919, 7153, 3401, 62, 2313, 1028, 253, 410, 3504, 2804, 589, 4018, 26680, 902, 1276, 6934, 2140, 968, 45210, 1784, 1291, 7361, 380, 3672, 6539, 55814, 5505, 1997, 1198, 1231, 4039, 49932, 231, 588, 1012, 296, 4935, 592, 37729, 8582, 26258, 266, 48696, 6373, 923, 6909, 45928, 2297, 45517, 5444, 44761, 65, 247, 714, 4963, 104, 7020, 4973, 54259, 56367, 2431, 3676, 317, 1207, 95, 56171, 542, 110, 367, 3863, 912, 2076, 2455, 2000, 48414, 783, 780, 8507, 590, 8784, 1259, 45720, 1104, 5958, 31, 5992, 59615, 2067, 6223, 3949, 3751, 1580, 1258, 2115, 52328, 595, 53460, 551, 56174, 1968, 2683, 1151, 6365, 8622, 2028, 8464, 520, 56915, 5349, 1199, 6222, 4008, 2987, 1036, 48698, 55820, 6291, 8961, 2087, 48, 920, 2502, 1021, 3186, 58299, 1032, 3108, 153, 1022, 1029, 3034, 260, 3107, 1, 1961, 4226, 2858, 233, 539, 54272, 6377, 596, 2054, 497, 1298, 55999, 2916, 1441, 2716, 4995, 1620, 3798, 491, 527, 1196, 2846]
+# recommendations = recommend_movies(test_user, 20, watched_movie_ids)
+# print("Recommendations: \n", recommendations)
+
+# Generate predictions for held-out test interactions for NDCG evaluation
+
+test_data = pd.read_csv("data/test_data.csv")
+
+user_cols = np.load(
+    "data/user_cols.npy"
+)
+
+movie_cols = [
+    "movie_" + col
+    for col in movie_catalogue.columns
+    if col not in metadata_cols
 ]
 
-user_ratings = user_ratings.merge(
-    movie_catalogue[
-        ["movieId", "title_clean", "Release_Year"]
-    ],
-    on="movieId",
-    how="left"
+# get test features
+X_user_test = test_data[user_cols]
+X_movie_test = test_data[movie_cols]
+
+# scale 
+X_user_test_scaled = user_scaler.transform(
+    X_user_test
 )
 
-top_rated = (
-    user_ratings
-    .sort_values("rating", ascending=False)
-    .head(20)
+X_movie_test_scaled = movie_scaler.transform(
+    X_movie_test
 )
 
-print("\nPrevious:")
-print(
-    top_rated[
-        ["movieId", "title_clean", "Release_Year", "rating"]
-    ].to_string(index=False)
+# predict all test interactions
+predictions = model.predict(
+    [
+        X_user_test_scaled,
+        X_movie_test_scaled
+    ]
 )
+
+# convert predictions back to rating scale
+predictions = y_scaler.inverse_transform(
+    predictions
+).flatten()
+
+# store IDs + prediction
+candidate_preds = test_data[
+    ["userId", "movieId"]
+].copy()
+
+candidate_preds["predicted_rating"] = predictions
+
+# export for NDCG notebook
+candidate_preds.to_parquet(
+    "data/candidate_preds.parquet",
+    index=False
+)
+
+print(candidate_preds.head())
+print("Predictions:", len(candidate_preds))
+
 
 #TODO:
-#Proper eval
+#NDCG eval ranking accuracy
 #User_features transformation to feed into pipeline
 #Connect frontend
-#Pipeline API call and initial filter data pipeline 
+# Retrieval Filter Rank Model
+#XGBoost Hybrid 
+# Collab Filtering Hybrid

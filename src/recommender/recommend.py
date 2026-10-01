@@ -11,6 +11,7 @@ user_scaler = joblib.load('models/scaler_users.pkl')
 movie_scaler = joblib.load('models/scaler_movies.pkl')
 y_scaler = joblib.load('models/scaler_y.pkl')
 
+# from 03
 movie_catalogue = pd.read_parquet('data/movie_catalogue.parquet')
 
 metadata_cols = [
@@ -56,6 +57,7 @@ def score_movies(X_user):
     
     return predictions_unscaled.flatten()
 
+#not part of current pipeline, but can be used to recommend movies for a given user
 def recommend_movies(X_user, top_n, watched_movie_ids):
     """
     Recommend top N movies for a given user based on predicted ratings.
@@ -72,6 +74,7 @@ def recommend_movies(X_user, top_n, watched_movie_ids):
     results['predicted_rating'] = scores
     
     #filter out watched movies
+    #current pipeline not taking from watched movies
     results = results[~results['movieId'].isin(watched_movie_ids)]
 
     results = results.sort_values(by='predicted_rating', ascending=False)
@@ -93,17 +96,15 @@ def recommend_movies(X_user, top_n, watched_movie_ids):
 
 # Generate predictions for held-out test interactions for NDCG evaluation
 
+# from 03, combined and enriched table 
 test_data = pd.read_csv("data/test_data.csv")
 
 user_cols = np.load(
     "data/user_cols.npy"
 )
-
-movie_cols = [
-    "movie_" + col
-    for col in movie_catalogue.columns
-    if col not in metadata_cols
-]
+movie_cols = np.load(
+    "data/movie_cols.npy"
+)
 
 # get test features
 X_user_test = test_data[user_cols]
@@ -113,7 +114,6 @@ X_movie_test = test_data[movie_cols]
 X_user_test_scaled = user_scaler.transform(
     X_user_test
 )
-
 X_movie_test_scaled = movie_scaler.transform(
     X_movie_test
 )
@@ -131,9 +131,9 @@ predictions = y_scaler.inverse_transform(
     predictions
 ).flatten()
 
-# store IDs + prediction
+# loading xgboost features 
 candidate_preds = test_data[
-    ["userId", "movieId"]
+    ["userId", "movieId", "rating","user_avg_rating", "user_std_rating", "user_count_rating", "movie_Release_Year", "genre_affinity", "decade_affinity"]
 ].copy()
 
 candidate_preds["predicted_rating"] = predictions
@@ -143,15 +143,43 @@ candidate_preds.to_parquet(
     "data/candidate_preds.parquet",
     index=False
 )
-
 print(candidate_preds.head())
 print("Predictions:", len(candidate_preds))
 
+# rank and group by user
+candidate_preds_ranked = (
+    candidate_preds
+    .sort_values(
+        ["userId", "predicted_rating"],
+        ascending=[True, False]
+    )
+    .reset_index(drop=True)
+)
+candidate_preds_ranked["user_rank"] = (
+    candidate_preds_ranked
+    .groupby("userId")["predicted_rating"]
+    .rank(method="first", ascending=False)
+    .astype(int)
+)
+candidate_preds_ranked["z_score"] = (
+    candidate_preds_ranked["predicted_rating"] - candidate_preds_ranked.groupby("userId")["predicted_rating"].transform("mean")
+) / candidate_preds_ranked.groupby("userId")["predicted_rating"].transform("std")
+
+print(candidate_preds_ranked)
+print(candidate_preds_ranked["user_rank"].describe())
+print(candidate_preds_ranked.columns.tolist())
+
+# export for xgboost
+candidate_preds_ranked.to_parquet(
+    "data/test_candidate_preds_ranked.parquet",
+    index=False
+)
+
 
 #TODO:
-#NDCG eval ranking accuracy
 #User_features transformation to feed into pipeline
-#Connect frontend
-# Retrieval Filter Rank Model
-#XGBoost Hybrid 
-# Collab Filtering Hybrid
+#Connect frontend 
+# Retrieval Filter Rank Model 
+#XGboost remaining features
+# - cosine similarity (AP)
+# Collab Filtering Hybrid (AP) 

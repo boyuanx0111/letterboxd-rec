@@ -179,7 +179,6 @@ candidate_preds_ranked.to_parquet(
 #TODO:
 #User_features transformation to feed into pipeline 
 #Connect frontend 
-# Retrieval Filter Rank Model 
 #XGboost remaining features
 # - cosine similarity (AP)
 # Collab Filtering Hybrid (AP) 

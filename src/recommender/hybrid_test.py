@@ -134,7 +134,7 @@ xgbmodel.load_model("models/xgboostranker_model.json")
 
 xgboost_input = candidate_preds_ranked.copy()
 feature_cols = xgbmodel.get_booster().feature_names
-xgboost_input = candidate_preds_ranked[feature_cols]
+xgboost_input = xgboost_input[feature_cols]
 
 candidate_preds_ranked["xgb_predicted_rating"] = xgbmodel.predict(xgboost_input)
 

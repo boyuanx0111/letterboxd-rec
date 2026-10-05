@@ -1,386 +1,231 @@
-# Letterboxd AI Movie Recommender 🎬
+# Letterboxd AI Movie Recommender
 
-A personalised movie recommendation system that uses Letterboxd user data and machine learning to understand individual viewing preferences and generate tailored movie recommendations.
+A hybrid movie recommender built from Letterboxd CSV exports and TMDB/MovieLens-derived features.
 
-The project combines **content-based filtering**, **collaborative filtering**, and **hybrid recommendation techniques** to create a Netflix-style recommendation experience designed specifically for Letterboxd users.
+The latest pipeline uses a two-stage ranking flow:
 
----
+1. A two-tower neural network retrieves candidate movie scores from user and movie embeddings.
+2. An `XGBRanker` reranks those candidates using enriched user, movie, and retrieval features.
 
-## 🚀 Project Overview
-
-Letterboxd provides users with rich movie taste data through ratings, watch history, diary entries, and watchlists. This project aims to transform that data into meaningful recommendations by learning:
-
-- What genres, directors, and themes a user prefers
-- Which users have similar movie tastes
-- Which unseen movies are most likely to match their interests
-
-### Input
-
-Users provide:
-
-- Letterboxd CSV export
-  - Ratings
-  - Watched movies
-  - Diary history
-  - Watchlist
-
-### Output
-
-The system generates:
-
-- Personalised movie recommendations
-- Similar movie suggestions
-- Taste profiles
-- Recommendation explanations
-
-Example:
-
-> "Recommended because you rated *Parasite*, *Memories of Murder*, and other Korean thrillers highly."
+The system works directly fas user uploads their letterboxd file and recommender recommends list of 10 movies.
 
 ---
 
-# 🏗️ System Architecture
+## Current Pipeline
 
+```mermaid
+flowchart TD
+    A[Letterboxd CSV export] --> B[Feature engineering]
+    B --> C[User feature frame]
+    B --> D[Movie feature frame]
+    C --> E[User tower]
+    D --> F[Movie tower]
+    E --> G[Two-tower dot score]
+    F --> G
+    G --> H[Candidate predictions]
+    H --> I[XGBRanker rerank]
+    I --> J[Top-N recommendations]
 ```
-                    User
-                     |
-                     v
-              Next.js Frontend
-                     |
-                     v
-              FastAPI Backend
-                     |
-        +------------+------------+
-        |                         |
-        v                         v
- PostgreSQL Database        ML Recommendation Engine
-                                    |
-                    +---------------+---------------+
-                    |                               |
-                    v                               v
-          Content-Based Model          Collaborative Filtering Model
-          (Movie Similarity)           (User Preference Learning)
-                    |                               |
-                    +---------------+---------------+
-                                    |
-                                    v
-                         Hybrid Ranking System
-                                    |
-                                    v
-                         Personalised Recommendations
-```
+
+### What `src/recommender/hybrid_test.py` does now
+
+- Loads the filtered Letterboxd sample data and TMDB links.
+- Reconstructs user and movie features from the saved Parquet files.
+- Loads saved `user_embeddings_nn.parquet` and `movie_embeddings_nn.parquet`.
+- Normalizes both embedding vectors and computes the two-tower retrieval score.
+- Builds `candidate_preds` with enriched features.
+- Applies `XGBRanker` as the final reranking stage.
+- Produces the ranked recommendation tables used for evaluation.
 
 ---
 
-# ✨ Features
+## Model Stack
 
-## Current Goals
+### Two-Tower Retrieval Model
 
-### 📂 Letterboxd Data Import
-- Upload Letterboxd CSV exports
-- Process user ratings and watch history
-- Convert raw data into recommendation-ready formats
+The retrieval model is the saved Keras two-tower network in `models/two_tower.keras`.
 
-### 🎥 Movie Understanding
-Movie information is collected using external movie metadata sources:
+- User tower: dense projection to a 32-dimensional embedding.
+- Movie tower: dense projection to a 32-dimensional embedding.
+- Final scoring: L2-normalize both tower outputs, then take the dot product.
+- Target scaling: the rating target is stored with `MinMaxScaler((-1, 1))` in `models/scaler_y.pkl`.
 
-- Genres
-- Directors
-- Cast
-- Release year
-- Plot descriptions
-- Keywords
+Important detail: the saved embedding Parquet files contain the raw tower outputs, not the normalized vectors used by the final dot-product scorer.
 
-### 🤖 Recommendation Engine
+### Final Reranker
 
-The system combines multiple recommendation approaches:
+The final ranking stage is `XGBRanker`.
 
-### Content-Based Filtering
-
-Recommends movies based on similarity between films a user enjoys.
-
-Uses:
-
-- Movie metadata
-- Text embeddings
-- Genre preferences
-- Director preferences
-
-Example:
-
-```
-User likes:
-- The Godfather
-- Goodfellas
-- Casino
-
-Recommendations:
-- The Departed
-- Heat
-- Once Upon a Time in America
-```
+- It consumes the candidate set produced by the two-tower stage.
+- It reranks movies using the enriched features below.
+- It is the latest final-stage model used by the project.
 
 ---
 
-### Collaborative Filtering
+## Enriched Features
 
-Learns from patterns across users.
+### User Features
 
-Uses:
+- `user_Action`
+- `user_Adventure`
+- `user_Animation`
+- `user_Children`
+- `user_Comedy`
+- `user_Crime`
+- `user_Documentary`
+- `user_Drama`
+- `user_Fantasy`
+- `user_Film-Noir`
+- `user_Horror`
+- `user_IMAX`
+- `user_Musical`
+- `user_Mystery`
+- `user_Romance`
+- `user_Sci-Fi`
+- `user_Thriller`
+- `user_War`
+- `user_Western`
+- `user_Decade_1890.0` through `user_Decade_2020.0`
+- `user_avg_rating`
+- `user_std_rating`
+- `user_count_rating`
 
-- User-movie rating interactions
-- Similar user preferences
-- Matrix factorisation techniques
+### Movie Features
 
-Example:
+- `movie_Action`
+- `movie_Adventure`
+- `movie_Animation`
+- `movie_Children`
+- `movie_Comedy`
+- `movie_Crime`
+- `movie_Documentary`
+- `movie_Drama`
+- `movie_Fantasy`
+- `movie_Film-Noir`
+- `movie_Horror`
+- `movie_IMAX`
+- `movie_Musical`
+- `movie_Mystery`
+- `movie_Romance`
+- `movie_Sci-Fi`
+- `movie_Thriller`
+- `movie_War`
+- `movie_Western`
+- `movie_Release_Year`
+- `movie_title_clean`
+- `movie_avg_rating`
+- `movie_Decade_1890.0` through `movie_Decade_2020.0`
+- `movie_tmdb_0` through `movie_tmdb_31`
+  - 32-dimensional TMDB embedding block
 
-```
-Users with similar taste enjoyed:
-- Oldboy
-- Burning
-- Memories of Murder
-```
+### Hybrid / Ranking Features
 
----
-
-### Hybrid Recommendation Model
-
-Combines multiple signals:
-
-```
-Recommendation Score =
-
-50% Collaborative Filtering
-30% Content Similarity
-20% User Preferences
-```
+- `predicted_rating`
+- `user_rank`
+- `z_score`
+- `genre_affinity`
+- `decade_affinity`
 
 ---
 
 # 🛠️ Tech Stack
 
-## Frontend
+## Frontend / UI
 
 - Next.js
 - React
 - TypeScript
 - Tailwind CSS
 
-## Backend
+## Core ML Stack
 
 - Python
-- FastAPI
-- SQLAlchemy
-- Pydantic
-
-## Database
-
-- PostgreSQL
-
-## Machine Learning
-
 - Pandas
 - NumPy
+- TensorFlow / Keras
+- XGBoost
 - Scikit-learn
-- LightFM
-- Sentence Transformers
+- Jupyter notebooks
 
 ## Data Sources
 
 - Letterboxd CSV exports
-- TMDB API
-
-## Deployment
-
-- Vercel (Frontend)
-- Render/Railway (Backend)
-- Supabase (Database)
+- MovieLens 32M
+- TMDB metadata and link tables
 
 ---
 
-# 📁 Project Structure
+## Project Structure
 
-```
-letterboxd-ai/
-
-├── frontend/              # Next.js web application
-│
-├── backend/               # FastAPI backend service
-│   ├── routes/
-│   ├── services/
-│   └── database/
-│
-├── ml/                    # Machine learning models
-│   ├── models/
-│   ├── training/
-│   └── notebooks/
-│
-├── pipeline/              # Data processing workflows
-│
+```text
+letterboxd-rec/
 ├── data/
-│   └── example/           # Sample datasets
-│
-├── docs/                  # Documentation
-│
-├── README.md
-└── .gitignore
+├── frontend/
+├── models/
+├── notebooks/
+├── pipeline/
+├── src/
+│   └── recommender/
+└── README.md
 ```
 
 ---
 
-# ⚙️ Getting Started
+## Getting Started
 
-## Prerequisites
-
-Install:
+### Prerequisites
 
 - Python 3.11+
-- Node.js
-- PostgreSQL
 - Git
+- Optional: Node.js if you want to experiment with the frontend folder
 
----
+### Local Run
 
-## Backend Setup
-
-Clone the repository:
-
-```bash
-git clone https://github.com/yourusername/letterboxd-ai.git
-
-cd letterboxd-ai
-```
-
-Create Python environment:
-
-```bash
-python -m venv venv
-```
-
-Activate:
-
-Windows:
+The current workflow is file-based, so the main inputs are already in `data/` and `models/`.
 
 ```powershell
+git clone https://github.com/yourusername/letterboxd-rec.git
+cd letterboxd-rec
+python -m venv venv
 venv\Scripts\activate
-```
-
-Mac/Linux:
-
-```bash
-source venv/bin/activate
-```
-
-Install dependencies:
-
-```bash
 pip install -r requirements.txt
 ```
 
-Run backend:
+To inspect the latest hybrid evaluation pipeline:
 
-```bash
-uvicorn backend.main:app --reload
+```powershell
+python src/recommender/hybrid_test.py
 ```
 
 ---
 
-## Frontend Setup
+## Evaluation
 
-Navigate to frontend:
+Recommendation quality is currently checked with ranking metrics such as:
 
-```bash
-cd frontend
-```
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-Run:
-
-```bash
-npm run dev
-```
+- RMSE for score calibration
+- NDCG@20 for ranked recommendation quality
+- Precision@K / Recall@K for retrieval quality
 
 ---
 
-# 📊 Machine Learning Evaluation
+## Implementation Plan
 
-Recommendation quality will be measured using:
+### Current
 
-## RMSE
+- File-based inference and evaluation from saved CSV, Parquet, and model artifacts.
+- Two-tower retrieval followed by `XGBRanker` reranking.
+- Enriched user and movie feature frames stored in `data/`.
 
-Measures how accurately the model predicts user ratings.
+### Next
 
-## Precision@K
-
-Measures how many recommended movies are relevant.
-
-## Recall@K
-
-Measures how many relevant movies are successfully discovered.
-
----
-
-# 🗺️ Development Roadmap
-
-## Phase 1 — Foundation
-
-- [ ] Setup repository structure
-- [ ] Create database schema
-- [ ] Import Letterboxd data
-- [ ] Integrate TMDB metadata
-
-## Phase 2 — Recommendation Engine
-
-- [ ] Build popularity baseline
-- [ ] Implement content-based model
-- [ ] Implement collaborative filtering
-- [ ] Create hybrid ranking system
-
-## Phase 3 — Application
-
-- [ ] Build FastAPI endpoints
-- [ ] Connect recommendation service
-- [ ] Create frontend interface
-
-## Phase 4 — Improvements
-
-- [ ] Recommendation explanations
-- [ ] User taste profiles
-- [ ] Letterboxd-style yearly insights
-- [ ] Improved ranking algorithms
+- Wrap the hybrid pipeline behind a clean application entrypoint.
+- Keep the final rerank stage on `XGBRanker`.
+- Reduce import-time side effects in the recommender utilities.
+- Add a lightweight UI or demo that reads from the saved artifacts.
 
 ---
 
-# 👥 Team Workflow
+## Project Goal
 
-Development uses GitHub branching:
-
-```
-main
- |
-dev
- |
-+-- feature/data-pipeline
-+-- feature/ml-model
-+-- feature/backend-api
-+-- feature/frontend
-```
-
-Workflow:
-
-1. Create feature branch
-2. Develop and commit changes
-3. Open Pull Request
-4. Merge into `dev`
-5. Release stable versions into `main`
-
----
-
-# 🎯 Project Goal
-
-Build a personalised movie discovery platform that combines machine learning and user preference modelling to deliver recommendations tailored to each Letterboxd user's unique taste.
+Build a personalised movie discovery workflow that combines a two-tower retrieval model with an `XGBRanker` reranker, using enriched Letterboxd and TMDB features without requiring a database.

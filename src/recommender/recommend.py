@@ -175,10 +175,7 @@ candidate_preds_ranked.to_parquet(
     index=False
 )
 
-
 #TODO:
-#User_features transformation to feed into pipeline 
-#Connect frontend 
 # upload correct data to github inc movie catalogue, movie_embeddsing, genre_cols
 #XGboost remaining features
 # - cosine similarity (AP)

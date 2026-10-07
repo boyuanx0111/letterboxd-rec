@@ -176,9 +176,9 @@ letterboxd-rec/
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.11-3.13 (TensorFlow does not provide a Python 3.14 wheel)
 - Git
-- Optional: Node.js if you want to experiment with the frontend folder
+- Node.js and npm for the frontend
 
 ### Local Run
 

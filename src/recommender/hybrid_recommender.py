@@ -163,7 +163,9 @@ def hybrid_recommend(user_ratings, root_dir=None):
         where=movie_norms != 0,
     )
 
-    predictions_scaled = movie_vectors @ user_vectors[0]
+    # Both towers are unit-normalized: the dot product is cosine similarity.
+    embedding_cosine_similarity = np.clip(movie_vectors @ user_vectors[0], -1.0, 1.0)
+    predictions_scaled = embedding_cosine_similarity
     predictions = y_scaler.inverse_transform(
         predictions_scaled.reshape(-1, 1)
     ).ravel()
@@ -172,6 +174,7 @@ def hybrid_recommend(user_ratings, root_dir=None):
         {
             "tmdbId": candidate_ids.to_numpy(),
             "predicted_rating": predictions,
+            "embedding_cosine_similarity": embedding_cosine_similarity,
         }
     )
 

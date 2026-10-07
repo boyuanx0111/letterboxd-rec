@@ -133,7 +133,7 @@ predictions = y_scaler.inverse_transform(
 
 # loading xgboost features 
 candidate_preds = test_data[
-    ["userId", "movieId", "rating","user_avg_rating", "user_std_rating", "user_count_rating", "movie_Release_Year", "genre_affinity", "decade_affinity"]
+    ["userId", "movieId", "rating","user_avg_rating", "user_std_rating", "user_count_rating", "movie_Release_Year", "genre_affinity", "decade_affinity", "embedding_cosine_similarity"]
 ].copy()
 
 candidate_preds["predicted_rating"] = predictions

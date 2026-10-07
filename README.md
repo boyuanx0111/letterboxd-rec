@@ -7,7 +7,7 @@ The latest pipeline uses a two-stage ranking flow:
 1. A two-tower neural network retrieves candidate movie scores from user and movie embeddings.
 2. An `XGBRanker` reranks those candidates using enriched user, movie, and retrieval features.
 
-The system works directly fas user uploads their letterboxd file and recommender recommends list of 10 movies.
+Users upload their Letterboxd ratings CSV and receive a ranked list of 10 movies.
 
 ---
 
@@ -15,7 +15,8 @@ The system works directly fas user uploads their letterboxd file and recommender
 
 ```mermaid
 flowchart TD
-    A[Letterboxd CSV export] --> B[Feature engineering]
+    A[Letterboxd ratings.csv upload] --> P[Parser adds TMDB IDs]
+    P --> B[Feature engineering]
     B --> C[User feature frame]
     B --> D[Movie feature frame]
     C --> E[User tower]
@@ -181,8 +182,6 @@ letterboxd-rec/
 
 ### Local Run
 
-The current workflow is file-based, so the main inputs are already in `data/` and `models/`.
-
 ```powershell
 git clone https://github.com/yourusername/letterboxd-rec.git
 cd letterboxd-rec
@@ -191,11 +190,23 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-To inspect the latest hybrid evaluation pipeline:
+Start the API from the project root:
 
 ```powershell
-python src/recommender/hybrid_test.py
+uvicorn backend.main:app --reload
 ```
+
+Then start the upload UI in another terminal:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Upload the `ratings.csv` from a Letterboxd data export. The Python parser maps
+up to 10 films concurrently, reuses `data/letterboxd/cache.json`, and passes
+the matched TMDB IDs and ratings into the hybrid recommender.
 
 ---
 

@@ -1,155 +1,246 @@
-# hybrid rec pipeline 
-# tt-nn filters top 300 per user, then xgboost ranks and filters top 10
-# input parsed user ratings (tmdbId, rating) to build user features and embeddings, then score all movies and rank with xgboost
+"""Two-tower retrieval followed by XGBoost reranking."""
 
-import pandas as pd
-import joblib
-import numpy as np
-import tensorflow as tf
-from tensorflow.keras.models import load_model
-# run from this dir
-from pipelinept1 import initial_rank
-from build_user_features import build_user_features
-from xgboost import XGBRegressor
-import xgboost as xgb
-from sklearn.metrics import ndcg_score
+import threading
+from functools import lru_cache
+from pathlib import Path
 
-# preprocess test data to tt-nn input
 
-# PREPROCESS USER INPUT TO THIS (tmdbId, rating) !!
-# PASS PARSED HERE 
-user_ratings = # user_input parsed into suitable form 
+class RecommenderInputError(ValueError):
+    """Raised when supplied ratings cannot be used for recommendation."""
 
-# import movie feature frame
-movie_feature_frame = pd.read_parquet("data/movie_feature_frame.parquet")
 
-# complete movie embeddings with tmdbId as index
-movie_embeddings = pd.read_parquet("data/movie_embeddings_nn.parquet")
+_INFERENCE_LOCK = threading.Lock()
+_ARTIFACT_LOAD_LOCK = threading.Lock()
 
-# users feature frame from USER INPUT
-user_feature_frame = build_user_features(user_ratings, movie_embeddings)
 
-# user embeddings from filtered sample ratings set 2
-user_embeddings = pd.read_parquet("data/user_embeddings_nn.parquet")
+@lru_cache(maxsize=1)
+def _load_artifacts(root: Path):
+    """Load immutable data and model artifacts once for each project root."""
 
-user_scaler = joblib.load('models/scaler_users.pkl')
-movie_scaler = joblib.load('models/scaler_movies.pkl')
-y_scaler = joblib.load('models/scaler_y.pkl')
+    import joblib
+    import pandas as pd
+    import xgboost as xgb
+    from tensorflow.keras.models import load_model
 
-# create user embeddings from user feature frame using userNN model
-user_feature_scaled = user_scaler.transform(user_feature_frame)
-userNN = load_model('../models/userNN.keras')
-user_embeddings = userNN.predict(user_feature_scaled)
-user_embeddings_df = pd.DataFrame(user_embeddings, index=user_feature_frame.index)
+    data_dir = root / "data"
+    model_dir = root / "models"
 
-# predict
-# movie_embeddings - (87585, 32)
-# user_embeddings - 
-user_vecs = user_embeddings_df.to_numpy()
-# create unwatched movie list of tmdbIds for user to extract corresponding movie embeddings
-movie_vecs = movie_embeddings[~movie_embeddings.index.isin(user_ratings["tmdbId"])]
+    movie_features = pd.read_parquet(data_dir / "movie_feature_frame.parquet")
+    movie_embeddings = pd.read_parquet(data_dir / "movie_embeddings_nn.parquet")
+    movie_features = movie_features[movie_features.index.notna()]
+    movie_embeddings = movie_embeddings[movie_embeddings.index.notna()]
+    catalogue_ids = movie_features.index.intersection(movie_embeddings.index)
+    movie_features = movie_features.loc[catalogue_ids]
+    movie_embeddings = movie_embeddings.loc[catalogue_ids]
 
-# normalise before dot product
-user_vecs = tf.keras.ops.normalize(user_vecs, axis=1)
-movie_vecs = tf.keras.ops.normalize(movie_vecs, axis=1)
-
-# vectorised dot product to get predictions for all user-movie pairs in the test set
-predictions_scaled = np.sum(user_vecs * movie_vecs, axis=1)
-# convert predictions back to rating scale
-predictions = y_scaler.inverse_transform(predictions_scaled.reshape(-1, 1)).flatten()
-
-#build candidate_preds dataframe for xgboost input
-candidate_preds = pd.DataFrame({
-    "tmdbId": user_ratings["tmdbId"],
-    "rating": user_ratings["rating"],
-    # user_avg rating
-    # user_std rating
-    # user_count rating
-    # movie_Release_Year
-    # genre_affinity
-    # decade_affinity
-    "predicted_rating": predictions
-})
-candidate_preds = candidate_preds.merge(user_feature_frame[["user_avg_rating", "user_std_rating", "user_count_rating"]], how="left")
-candidate_preds = candidate_preds.merge(movie_feature_frame[["movie_Release_Year"]], on="tmdbId", how="left")
-
-# calc genre affinity for each user-movie pair
-genre_columns = pd.read_csv("data/genre_columns.csv").squeeze().tolist()
-user_genre_cols = [f"user_{genre}" for genre in genre_columns]
-movie_genre_cols = [f"movie_{genre}" for genre in genre_columns]
-user_genre_values = (
-    user_feature_frame
-    .loc[user_genre_cols]
-    .fillna(0)
-    .to_numpy()
-)
-movie_genre_values = (
-    movie_feature_frame
-    .loc[candidate_preds["tmdbId"], movie_genre_cols]
-    .fillna(0)
-    .to_numpy()
-)
-genre_counts = movie_genre_values.sum(axis=1)
-candidate_preds["genre_affinity"] = np.divide(
-    (user_genre_values * movie_genre_values).sum(axis=1), 
-    genre_counts,
-    out=np.full(len(candidate_preds), np.nan),
-    where=genre_counts != 0
-)
-
-# calc decade affinity for each user-movie pair
-movie_decade_cols = [col for col in movie_feature_frame.columns if col.startswith("movie_Decade_")]
-user_decade_cols = [col for col in user_feature_frame.columns if col.startswith("user_Decade_")]
-user_decade_values = (
-    user_feature_frame
-    .loc[user_decade_cols]
-    .fillna(0)
-    .to_numpy()
-)
-movie_decade_values = (
-    movie_feature_frame
-    .loc[candidate_preds["tmdbId"], movie_decade_cols]
-    .fillna(0)
-    .to_numpy()
-)
-decade_counts = movie_decade_values.sum(axis=1)
-candidate_preds["decade_affinity"] = np.divide(
-    (user_decade_values * movie_decade_values).sum(axis=1),
-    decade_counts,
-    out=np.full(len(candidate_preds), np.nan),
-    where=decade_counts != 0
-)
-
-# build candidate_preds_ranked dataframe for xgboost input
-candidate_preds_ranked = initial_rank(candidate_preds)
-
-# loading xgboost features 
-xgbmodel = xgb.XGBRanker()
-xgbmodel.load_model("models/xgboostranker_model.json")
-
-xgboost_input = candidate_preds_ranked.copy()
-feature_cols = xgbmodel.get_booster().feature_names
-xgboost_input = xgboost_input[feature_cols]
-
-candidate_preds_ranked["xgb_predicted_rating"] = xgbmodel.predict(xgboost_input)
-
-candidate_preds_ranked["xgb_rank"] = (
-    candidate_preds_ranked["xgb_predicted_rating"]
-    .rank(method="first", ascending=False)
-)
-
-# keep top 10 recs per user from xgboost ranked predictions
-xgb_preds_ranked = (
-    candidate_preds_ranked[
-        candidate_preds_ranked["xgb_rank"] <= 10
-    ]
-    .sort_values(
-        ["xgb_rank"],
-        ascending=[True]
+    genre_columns = (
+        pd.read_csv(data_dir / "genre_columns.csv")
+        .squeeze("columns")
+        .dropna()
+        .astype(str)
+        .tolist()
     )
-    .reset_index(drop=True)
-)
+    user_scaler = joblib.load(model_dir / "scaler_users.pkl")
+    y_scaler = joblib.load(model_dir / "scaler_y.pkl")
+    user_model = load_model(model_dir / "userNN.keras", compile=False)
+    ranker = xgb.XGBRanker()
+    ranker.load_model(str(model_dir / "xgboostranker_model.json"))
+    ranker_features = ranker.get_booster().feature_names
 
-# merge tmdbId with movie titles for display
-xgb_preds_ranked = xgb_preds_ranked.merge(movie_feature_frame[["tmdbId", "movie_title"]], on="tmdbId", how="left")
-print(xgb_preds_ranked[["tmdbId", "movie_title", "xgb_rank"]].head(10))
+    return (
+        movie_features,
+        movie_embeddings,
+        genre_columns,
+        user_scaler,
+        y_scaler,
+        user_model,
+        ranker,
+        ranker_features,
+    )
+
+
+def _get_artifacts(root: Path):
+    with _ARTIFACT_LOAD_LOCK:
+        return _load_artifacts(root)
+
+
+def hybrid_recommend(user_ratings, root_dir=None):
+    """Return the ten highest-ranked unwatched movies for one user.
+
+    Args:
+        user_ratings: DataFrame containing numeric ``tmdbId`` and ``rating``
+            columns.
+        root_dir: Project directory containing ``data`` and ``models``.
+            Defaults to the repository containing this module.
+    """
+
+    import numpy as np
+    import pandas as pd
+
+    from .build_user_features import build_user_features
+    from .pipelinept1 import initial_rank
+
+    root = (
+        Path(root_dir).expanduser().resolve()
+        if root_dir is not None
+        else Path(__file__).resolve().parents[2]
+    )
+    missing_columns = {"tmdbId", "rating"}.difference(user_ratings.columns)
+    if missing_columns:
+        missing = ", ".join(sorted(missing_columns))
+        raise RecommenderInputError(
+            f"Ratings are missing required columns: {missing}"
+        )
+
+    ratings = user_ratings[["tmdbId", "rating"]].copy()
+    ratings["tmdbId"] = pd.to_numeric(ratings["tmdbId"], errors="coerce")
+    ratings["rating"] = pd.to_numeric(ratings["rating"], errors="coerce")
+    ratings = ratings.dropna(subset=["tmdbId", "rating"])
+    ratings = ratings[
+        np.isfinite(ratings["tmdbId"])
+        & np.isfinite(ratings["rating"])
+        & ratings["tmdbId"].gt(0)
+        & ratings["rating"].gt(0)
+        & ratings["rating"].le(5)
+    ]
+    ratings = ratings.drop_duplicates(subset="tmdbId", keep="last")
+
+    if ratings.empty:
+        raise RecommenderInputError("The uploaded file contains no valid ratings.")
+
+    (
+        movie_feature_frame,
+        movie_embeddings,
+        genre_columns,
+        user_scaler,
+        y_scaler,
+        user_model,
+        ranker,
+        ranker_features,
+    ) = _get_artifacts(root)
+
+    catalogue_ids = movie_feature_frame.index
+    ratings = ratings[ratings["tmdbId"].isin(catalogue_ids)]
+
+    if ratings.empty:
+        raise RecommenderInputError(
+            "None of the uploaded ratings match movies in the recommendation catalogue."
+        )
+    catalogue_rating_count = len(ratings)
+
+    user_feature_frame = build_user_features(ratings, movie_feature_frame)
+    expected_user_columns = list(user_scaler.feature_names_in_)
+    user_feature_frame = user_feature_frame.reindex(
+        columns=expected_user_columns,
+        fill_value=0,
+    )
+    user_feature_scaled = user_scaler.transform(user_feature_frame)
+
+    with _INFERENCE_LOCK:
+        user_vectors = user_model.predict(user_feature_scaled, verbose=0)
+
+    watched_ids = set(ratings["tmdbId"])
+    candidate_ids = movie_embeddings.index[~movie_embeddings.index.isin(watched_ids)]
+    if candidate_ids.empty:
+        raise RecommenderInputError(
+            "There are no unwatched movies left to recommend."
+        )
+
+    movie_vectors = movie_embeddings.loc[candidate_ids].to_numpy(dtype="float32")
+    user_vectors = np.asarray(user_vectors, dtype="float32")
+    user_norms = np.linalg.norm(user_vectors, axis=1, keepdims=True)
+    movie_norms = np.linalg.norm(movie_vectors, axis=1, keepdims=True)
+    user_vectors = np.divide(
+        user_vectors,
+        user_norms,
+        out=np.zeros_like(user_vectors),
+        where=user_norms != 0,
+    )
+    movie_vectors = np.divide(
+        movie_vectors,
+        movie_norms,
+        out=np.zeros_like(movie_vectors),
+        where=movie_norms != 0,
+    )
+
+    predictions_scaled = movie_vectors @ user_vectors[0]
+    predictions = y_scaler.inverse_transform(
+        predictions_scaled.reshape(-1, 1)
+    ).ravel()
+
+    candidate_predictions = pd.DataFrame(
+        {
+            "tmdbId": candidate_ids.to_numpy(),
+            "predicted_rating": predictions,
+        }
+    )
+
+    user_stats = user_feature_frame.iloc[0]
+    for column in ("user_avg_rating", "user_std_rating", "user_count_rating"):
+        candidate_predictions[column] = user_stats[column]
+
+    candidate_predictions = candidate_predictions.join(
+        movie_feature_frame[["movie_Release_Year"]],
+        on="tmdbId",
+    )
+
+    user_genre_columns = [f"user_{genre}" for genre in genre_columns]
+    movie_genre_columns = [f"movie_{genre}" for genre in genre_columns]
+    user_genre_values = user_feature_frame.loc[
+        :, user_genre_columns
+    ].iloc[0].to_numpy(dtype="float64")
+    movie_genre_values = movie_feature_frame.loc[
+        candidate_ids, movie_genre_columns
+    ].fillna(0).to_numpy(dtype="float64")
+    genre_counts = movie_genre_values.sum(axis=1)
+    candidate_predictions["genre_affinity"] = np.divide(
+        (movie_genre_values * user_genre_values).sum(axis=1),
+        genre_counts,
+        out=np.full(len(candidate_predictions), np.nan, dtype="float64"),
+        where=genre_counts != 0,
+    )
+
+    movie_decade_columns = [
+        column
+        for column in movie_feature_frame.columns
+        if column.startswith("movie_Decade_")
+    ]
+    user_decade_columns = [
+        column.replace("movie_", "user_", 1)
+        for column in movie_decade_columns
+    ]
+    user_decade_values = user_feature_frame.loc[
+        :, user_decade_columns
+    ].iloc[0].to_numpy(dtype="float64")
+    movie_decade_values = movie_feature_frame.loc[
+        candidate_ids, movie_decade_columns
+    ].fillna(0).to_numpy(dtype="float64")
+    decade_counts = movie_decade_values.sum(axis=1)
+    candidate_predictions["decade_affinity"] = np.divide(
+        (movie_decade_values * user_decade_values).sum(axis=1),
+        decade_counts,
+        out=np.full(len(candidate_predictions), np.nan, dtype="float64"),
+        where=decade_counts != 0,
+    )
+
+    ranked_candidates = initial_rank(candidate_predictions)
+    with _INFERENCE_LOCK:
+        ranked_candidates["xgb_predicted_rating"] = ranker.predict(
+            ranked_candidates[ranker_features]
+        )
+    ranked_candidates["xgb_rank"] = (
+        ranked_candidates["xgb_predicted_rating"]
+        .rank(method="first", ascending=False)
+        .astype(int)
+    )
+
+    recommendations = (
+        ranked_candidates[ranked_candidates["xgb_rank"] <= 10]
+        .sort_values("xgb_rank")
+        .join(movie_feature_frame[["movie_title"]], on="tmdbId")
+        .reset_index(drop=True)
+    )
+    recommendations["tmdbId"] = recommendations["tmdbId"].astype("int64")
+    result = recommendations[["tmdbId", "movie_title", "xgb_rank"]].copy()
+    result.attrs["catalogue_rows"] = catalogue_rating_count
+    return result

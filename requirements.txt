@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pandas
+pyarrow
+numpy
+joblib
+scikit-learn==1.9.0
+tensorflow
+keras==3.15.1
+xgboost==3.4.1

@@ -1,8 +1,10 @@
 import asyncio
+import json
 import os
 import tempfile
 from pathlib import Path
 
+import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -12,10 +14,7 @@ from src.parser import (
     LetterboxdParserError,
     enrich_letterboxd_csv,
 )
-from src.recommender.hybrid_recommender import (
-    RecommenderInputError,
-    hybrid_recommend,
-)
+from src.recommender.hybrid_recommender import hybrid_recommend
 
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -82,16 +81,38 @@ async def get_recommendations(
         except LetterboxdMappingError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-        import_summary = dict(enriched_ratings.attrs.get("import_summary", {}))
+        import_summary = dict(
+            enriched_ratings.attrs.get("import_summary", {})
+        )
+        import_summary.setdefault("usable_rows", len(enriched_ratings))
+        import_summary.setdefault("total_rows", len(enriched_ratings))
 
-        try:
-            async with INFERENCE_SEMAPHORE:
-                recommendations = await run_in_threadpool(
-                    hybrid_recommend,
-                    enriched_ratings,
-                )
-        except RecommenderInputError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        # build_user_features matches ratings.index against catalogue TMDB IDs.
+        # Retain the column too: hybrid_recommend uses it to exclude watched films.
+        ratings_for_model = enriched_ratings[["tmdbId", "rating"]].copy()
+        ratings_for_model = ratings_for_model.set_index("tmdbId", drop=False)
+
+        async with INFERENCE_SEMAPHORE:
+            recommendations = await run_in_threadpool(
+                hybrid_recommend,
+                ratings_for_model,
+            )
+
+        if not isinstance(recommendations, pd.DataFrame):
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "hybrid_recommend must return its recommendation DataFrame. "
+                    "It currently only prints the results."
+                ),
+            )
+
+        required_columns = {"tmdbId", "movie_title", "xgb_rank"}
+        if not required_columns.issubset(recommendations.columns):
+            raise HTTPException(
+                status_code=500,
+                detail="The recommender result must contain tmdbId, movie_title and xgb_rank.",
+            )
 
         import_summary["catalogue_rows"] = recommendations.attrs.get(
             "catalogue_rows",
@@ -99,7 +120,10 @@ async def get_recommendations(
         )
 
         return {
-            "recommendations": recommendations.to_dict(orient="records"),
+            "recommendations": json.loads(
+                recommendations[["tmdbId", "movie_title", "xgb_rank"]]
+                .to_json(orient="records")
+            ),
             "import_summary": import_summary,
         }
 

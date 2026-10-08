@@ -35,10 +35,10 @@ def hybrid_recommend(user_ratings):
     movie_feature_frame = pd.read_parquet(DATA_DIR / "movie_feature_frame.parquet")
 
     # complete movie embeddings with tmdbId as index
-    movie_embeddings = pd.read_parquet(DATA_DIR / "movie_embeddings_nn.parquet")
+    norm_movie_embeddings = pd.read_parquet(DATA_DIR / "norm_movie_embeddings_nn.parquet")
 
     # keep uploaded ratings that match the catalogue
-    catalogue_ids = movie_feature_frame.index.intersection(movie_embeddings.index)
+    catalogue_ids = movie_feature_frame.index.intersection(norm_movie_embeddings.index)
     user_ratings = user_ratings[user_ratings["tmdbId"].isin(catalogue_ids)].copy()
 
     if user_ratings.empty:
@@ -61,19 +61,16 @@ def hybrid_recommend(user_ratings):
     # user_embeddings - 
     user_vecs = user_embeddings_df.to_numpy()
     # create unwatched movie list of tmdbIds for user to extract corresponding movie embeddings
-    movie_vecs = movie_embeddings[~movie_embeddings.index.isin(user_ratings["tmdbId"])]
-    candidate_movie_ids = movie_embeddings.index[~movie_embeddings.index.isin(user_ratings["tmdbId"])]
+    movie_vecs = norm_movie_embeddings[~norm_movie_embeddings.index.isin(user_ratings["tmdbId"])]
+    candidate_movie_ids = norm_movie_embeddings.index[~norm_movie_embeddings.index.isin(user_ratings["tmdbId"])]
 
-    # normalise before dot product
+    # normalise user before dot product (movie already normalised)
     user_vecs = tf.keras.ops.normalize(user_vecs, axis=1)
-    movie_vecs = tf.keras.ops.normalize(movie_vecs, axis=1)
 
     # vectorised dot product to get predictions for all user-movie pairs in the test set
-    predictions_scaled = np.sum(user_vecs * movie_vecs, axis=1)
+    predictions_scaled = movie_vecs.to_numpy() @ user_vecs[0].numpy()
     # convert predictions back to rating scale
     predictions = y_scaler.inverse_transform(predictions_scaled.reshape(-1, 1)).flatten()
-
-
 
     #build candidate_preds dataframe for xgboost input
     candidate_preds = pd.DataFrame({

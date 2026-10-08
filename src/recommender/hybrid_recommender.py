@@ -76,7 +76,9 @@ def hybrid_recommend(user_ratings):
     # convert predictions back to rating scale
     predictions = y_scaler.inverse_transform(predictions_scaled.reshape(-1, 1)).flatten()
 
-
+    # Both towers are unit-normalized: the dot product is cosine similarity.
+    embedding_cosine_similarity = np.clip(movie_vecs @ user_vecs[0], -1.0, 1.0)
+    predictions_scaled = embedding_cosine_similarity
 
     #build candidate_preds dataframe for xgboost input
     candidate_preds = pd.DataFrame({
@@ -87,6 +89,7 @@ def hybrid_recommend(user_ratings):
         # movie_Release_Year
         # genre_affinity
         # decade_affinity
+        "embedding_cosine_similarity": embedding_cosine_similarity,
         "predicted_rating": predictions
     })
 

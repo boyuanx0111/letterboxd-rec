@@ -47,9 +47,6 @@ def hybrid_recommend(user_ratings):
     # users feature frame from USER INPUT
     user_feature_frame = build_user_features(user_ratings, movie_feature_frame)
 
-    # user embeddings from filtered sample ratings set 2
-    user_embeddings = pd.read_parquet(DATA_DIR / "user_embeddings_nn.parquet")
-
     user_scaler = joblib.load(MODEL_DIR / 'scaler_users.pkl')
     y_scaler = joblib.load(MODEL_DIR / 'scaler_y.pkl')
 

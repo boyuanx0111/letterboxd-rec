@@ -132,6 +132,36 @@
   font-size: 14px;
 }
 
+.loading-track {
+  position: relative;
+  height: 7px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #f0e7dc;
+}
+
+.loading-indicator {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 38%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #a34112, #d97727);
+  animation: loading-sweep 1.25s ease-in-out infinite;
+}
+
+@keyframes loading-sweep {
+  from { transform: translateX(-105%); }
+  to { transform: translateX(270%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-indicator {
+    width: 100%;
+    animation: none;
+  }
+}
+
 .error-message {
   color: #b42318;
 }

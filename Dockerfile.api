@@ -1,0 +1,27 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    LETTERBOXD_CACHE_PATH=/var/lib/letterboxd-rec/cache.json
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt ./
+COPY requirements ./requirements
+RUN python -m pip install --no-cache-dir -r requirements.txt
+
+COPY backend ./backend
+COPY src ./src
+COPY models ./models
+COPY data/genre_columns.csv ./data/genre_columns.csv
+COPY data/movie_feature_frame.parquet ./data/movie_feature_frame.parquet
+COPY data/norm_movie_embeddings_nn.parquet ./data/norm_movie_embeddings_nn.parquet
+
+RUN mkdir -p /var/lib/letterboxd-rec
+
+EXPOSE 8000
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

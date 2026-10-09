@@ -1,257 +1,134 @@
-# Letterboxd AI Movie Recommender
+# Letterboxd Movie Recommender
 
-A hybrid movie recommender built from Letterboxd CSV exports and TMDB/MovieLens-derived features.
+A small full-stack movie recommender. Upload a Letterboxd `ratings.csv` export, map unrated external IDs through Letterboxd, retrieve candidates with a two-tower model, and rerank them with XGBoost.
 
-The latest pipeline uses a two-stage ranking flow:
+> **Project status:** research prototype. The web interface and API are present, but the recommender requires a large catalogue artifact that is not currently included in this repository. Follow [Data and model files](#data-and-model-files) before starting the API.
 
-1. A two-tower neural network retrieves candidate movie scores from user and movie embeddings.
-2. An `XGBRanker` reranks those candidates using enriched user, movie, and retrieval features.
+## How it works
 
-Users upload their Letterboxd ratings CSV and receive a ranked list of 10 movies.
+1. The React interface sends a Letterboxd ratings CSV to the FastAPI service.
+2. The parser uses existing TMDB IDs where present and resolves missing IDs from Letterboxd pages. It caches successful lookups under `data/letterboxd/cache.json`.
+3. User features are calculated from the ratings and movie feature catalogue.
+4. The user tower scores unseen catalogue movies against precomputed movie embeddings.
+5. The top candidates are reranked by the saved XGBoost ranker. The API returns up to 10 titles with TMDB links.
 
----
-
-## Current Pipeline
-
-```mermaid
-flowchart TD
-    A[Letterboxd ratings.csv upload] --> P[Parser adds TMDB IDs]
-    P --> B[Feature engineering]
-    B --> C[User feature frame]
-    B --> D[Movie feature frame]
-    C --> E[User tower]
-    D --> F[Movie tower]
-    E --> G[Two-tower dot score]
-    F --> G
-    G --> H[Candidate predictions]
-    H --> I[XGBRanker rerank]
-    I --> J[Top-N recommendations]
-```
-
-### What `src/recommender/hybrid_test.py` does now
-
-- Loads the filtered Letterboxd sample data and TMDB links.
-- Reconstructs user and movie features from the saved Parquet files.
-- Loads saved `user_embeddings_nn.parquet` and `movie_embeddings_nn.parquet`.
-- Normalizes both embedding vectors and computes the two-tower retrieval score.
-- Builds `candidate_preds` with enriched features.
-- Applies `XGBRanker` as the final reranking stage.
-- Produces the ranked recommendation tables used for evaluation.
-
----
-
-## Model Stack
-
-### Two-Tower Retrieval Model
-
-The retrieval model is the saved Keras two-tower network in `models/two_tower.keras`.
-
-- User tower: dense projection to a 32-dimensional embedding.
-- Movie tower: dense projection to a 32-dimensional embedding.
-- Final scoring: L2-normalize both tower outputs, then take the dot product.
-- Target scaling: the rating target is stored with `MinMaxScaler((-1, 1))` in `models/scaler_y.pkl`.
-
-Important detail: the saved embedding Parquet files contain the raw tower outputs, not the normalized vectors used by the final dot-product scorer.
-
-### Final Reranker
-
-The final ranking stage is `XGBRanker`.
-
-- It consumes the candidate set produced by the two-tower stage.
-- It reranks movies using the enriched features below.
-- It is the latest final-stage model used by the project.
-
----
-
-## Enriched Features
-
-### User Features
-
-- `user_Action`
-- `user_Adventure`
-- `user_Animation`
-- `user_Children`
-- `user_Comedy`
-- `user_Crime`
-- `user_Documentary`
-- `user_Drama`
-- `user_Fantasy`
-- `user_Film-Noir`
-- `user_Horror`
-- `user_IMAX`
-- `user_Musical`
-- `user_Mystery`
-- `user_Romance`
-- `user_Sci-Fi`
-- `user_Thriller`
-- `user_War`
-- `user_Western`
-- `user_Decade_1890.0` through `user_Decade_2020.0`
-- `user_avg_rating`
-- `user_std_rating`
-- `user_count_rating`
-
-### Movie Features
-
-- `movie_Action`
-- `movie_Adventure`
-- `movie_Animation`
-- `movie_Children`
-- `movie_Comedy`
-- `movie_Crime`
-- `movie_Documentary`
-- `movie_Drama`
-- `movie_Fantasy`
-- `movie_Film-Noir`
-- `movie_Horror`
-- `movie_IMAX`
-- `movie_Musical`
-- `movie_Mystery`
-- `movie_Romance`
-- `movie_Sci-Fi`
-- `movie_Thriller`
-- `movie_War`
-- `movie_Western`
-- `movie_Release_Year`
-- `movie_title_clean`
-- `movie_avg_rating`
-- `movie_Decade_1890.0` through `movie_Decade_2020.0`
-- `movie_tmdb_0` through `movie_tmdb_31`
-  - 32-dimensional TMDB embedding block
-
-### Hybrid / Ranking Features
-
-- `predicted_rating`
-- `user_rank`
-- `z_score`
-- `genre_affinity`
-- `decade_affinity`
-- `Original_Language_affinity`
-- `Origin_country_affinity`
-- `Director_affinity`
-- `Top_cast_affinity`
-- `Keyword_affinity`
-- `Overview_affinity`
-- `Production_company_affinity`
-- `vote_count_affinity`
-- `vote_average_affinity`
-- `revenue_affinity`
-
-The enriched affinities are calculated in Notebook 3 from train-only user ratings.
-Categorical and overview affinities average the user's historical rating preference
-for matching tokens, while numeric affinities measure the distance from the user's
-rating-weighted preference after skew correction and standardization.
-
----
-
-# 🛠️ Tech Stack
-
-## Frontend / UI
-
-- Next.js
-- React
-- TypeScript
-- Tailwind CSS
-
-## Core ML Stack
-
-- Python
-- Pandas
-- NumPy
-- TensorFlow / Keras
-- XGBoost
-- Scikit-learn
-- Jupyter notebooks
-
-## Data Sources
-
-- Letterboxd CSV exports
-- MovieLens 32M
-- TMDB metadata and link tables
-
----
-
-## Project Structure
+## Repository layout
 
 ```text
-letterboxd-rec/
-├── data/
-├── frontend/
-├── models/
-├── notebooks/
-├── pipeline/
-├── src/
-│   └── recommender/
-└── README.md
+backend/              FastAPI upload and recommendation endpoint
+frontend/             React 19 + Vite interface
+src/parser/           Letterboxd CSV parsing and ID mapping
+src/recommender/      Feature building and ranking pipeline
+models/               Saved Keras, scaler, and XGBoost artifacts
+notebooks/            Data exploration, feature engineering, and model work
+data/                 Local/generated data; only small required files are tracked
 ```
 
----
+## Requirements
 
-## Getting Started
+- CPython 3.11 is the project default (`.python-version`). The declared TensorFlow runtime targets Python 3.11–3.12; Python 3.13+ is currently unsupported by the pinned TensorFlow release.
+- Node.js and npm
+- Git LFS, to check out the tracked Parquet catalogue (see below)
+- Internet access when uploaded CSV rows need Letterboxd ID lookup
 
-### Prerequisites
+Python versions and operating systems have not yet been validated in CI. TensorFlow wheel availability and behavior can vary by platform; use a supported 64-bit Python build and treat 3.11 as the baseline until 3.12 and the operating systems are verified.
 
-- Python 3.11-3.13 (TensorFlow does not provide a Python 3.14 wheel)
-- Git
-- Node.js and npm for the frontend
+## Setup
 
-### Local Run
+Clone the repository with Git LFS installed and initialized so the catalogue is downloaded rather than left as an LFS pointer:
 
-```powershell
-git clone https://github.com/yourusername/letterboxd-rec.git
+```bash
+git lfs install
+git clone <repository-url>
 cd letterboxd-rec
-python -m venv venv
-venv\Scripts\activate
+```
+
+Create a Python environment and install the API/recommender dependencies:
+
+```bash
+python -m venv .venv
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Start the API from the project root:
+For notebook and feature-engineering work, install the larger optional stack instead:
 
-```powershell
+```bash
+pip install -r requirements/notebooks.txt
+```
+
+`requirements/runtime.txt` pins the API and inference packages; `requirements/notebooks.txt` adds notebook packages. `requirements.txt` is the compatibility entry point for runtime installation. Pins are explicit, but this repository does not yet include a resolver-generated lock file. To refresh pins, resolve and install on Python 3.11 first, then verify the same set on each claimed Python/platform combination before changing the supported range.
+
+Install frontend dependencies:
+
+```bash
+cd frontend
+npm ci
+cd ..
+```
+
+Start the API from the repository root:
+
+```bash
 uvicorn backend.main:app --reload
 ```
 
-Then start the upload UI in another terminal:
+In another terminal, start the UI:
 
-```powershell
+```bash
 cd frontend
-npm install
 npm run dev
 ```
 
-Upload the `ratings.csv` from a Letterboxd data export. The Python parser maps
-up to 10 films concurrently, reuses `data/letterboxd/cache.json`, and passes
-the matched TMDB IDs and ratings into the hybrid recommender.
+Open the local URL printed by Vite (normally `http://localhost:5173`) and upload the `ratings.csv` file from a Letterboxd data export. The API accepts CSV uploads up to 10 MB. It can also accept a CSV already enriched with TMDB IDs. If the UI needs to call a non-default API URL, set `VITE_API_BASE_URL` in `frontend/.env.local` before starting Vite.
 
----
+## Deployment
 
-## Evaluation
+The repository includes Dockerfiles for the API and static frontend, plus a Compose configuration for a single-host deployment. The API image includes the saved models and catalogue artifacts, so the missing-artifact requirement below must be resolved before building it.
 
-Recommendation quality is currently checked with ranking metrics such as:
+For Compose, copy `.env.deploy.example` to `.env` and set the public API URL:
 
-- RMSE for score calibration
-- NDCG@20 for ranked recommendation quality
-- Precision@K / Recall@K for retrieval quality
+```dotenv
+VITE_API_BASE_URL=https://your-api.example.com
+FRONTEND_PORT=8080
+```
 
----
+Then build and start:
 
-## Implementation Plan
+```bash
+docker compose --env-file .env up --build -d
+```
 
-### Current
+The frontend is served on port 8080 by default. Put the services behind HTTPS-capable hosting or a reverse proxy and point the public API hostname at the API container's port 8000. For a platform that deploys containers separately, build from `Dockerfile.api` and `frontend/Dockerfile`; set the build argument `VITE_API_BASE_URL` on the frontend. The URL is embedded into the static frontend at build time, so rebuild after changing it. The API does not enable CORS; serve the frontend and API through one origin or configure the reverse proxy to route API requests.
 
-- File-based inference and evaluation from saved CSV, Parquet, and model artifacts.
-- Two-tower retrieval followed by `XGBRanker` reranking.
-- Enriched user and movie feature frames stored in `data/`.
+The API accepts CSV files up to 10 MB, writes each upload to a temporary file only while processing it, and removes it when the request finishes. It keeps Letterboxd ID lookup results in `LETTERBOXD_CACHE_PATH` (default `data/letterboxd/cache.json`); the container defaults this to `/var/lib/letterboxd-rec/cache.json`. Mount persistent storage there if the cache should survive container replacement. The API serializes model inference to one request at a time, so set container memory/CPU based on the TensorFlow runtime and expect concurrent uploads to queue.
 
-### Next
+## Data and model files
 
-- Wrap the hybrid pipeline behind a clean application entrypoint.
-- Keep the final rerank stage on `XGBRanker`.
-- Reduce import-time side effects in the recommender utilities.
-- Add a lightweight UI or demo that reads from the saved artifacts.
+The inference code requires these files:
 
----
+| Path | Purpose | Current availability |
+| --- | --- | --- |
+| `data/movie_feature_frame.parquet` | Movie catalogue features and display titles | Tracked with Git LFS |
+| `data/norm_movie_embeddings_nn.parquet` | Precomputed movie tower embeddings | **Required, but ignored and not tracked** |
+| `data/genre_columns.csv` | Genre feature column list | Tracked |
+| `models/userNN.keras` | User tower | Tracked |
+| `models/scaler_users.pkl`, `models/scaler_y.pkl` | Input and output scaling | Tracked |
+| `models/xgboostranker_model.json` | Final reranker | Tracked |
 
-## Project Goal
+The app will not start recommendation inference until `norm_movie_embeddings_nn.parquet` is supplied in `data/`. It is generated by the model/data pipeline in the notebooks, but there is currently no documented one-command artifact build or public download. Do not publish it or the other derived datasets until their upstream source terms and redistribution permissions are checked. The larger training and evaluation data files are intentionally not committed.
 
-Build a personalised movie discovery workflow that combines a two-tower retrieval model with an `XGBRanker` reranker, using enriched Letterboxd and TMDB features without requiring a database.
+The API's ID cache is generated automatically. It may contain Letterboxd identifiers and should remain local; do not commit a personal export or cache.
+
+## Development notes
+
+- API entry point: `backend.main:app`; recommendation endpoint: `POST /recommend`.
+- Frontend: React + Vite (not Next.js); run `npm run dev`, `npm run build`, or `npm run lint` from `frontend/`.
+- The notebooks describe exploratory and training work; they are not a clean, end-to-end model training pipeline yet.
+- `src/recommender/hybrid_test.py` and `recommend.py` are evaluation/experimentation scripts and require additional local data files.
+
+## License
+
+This repository's code is provided under the MIT License; third-party data and model artifacts may have separate terms. See [LICENSE](LICENSE) and the notices accompanying each upstream dataset or artifact.

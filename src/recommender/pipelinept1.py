@@ -16,27 +16,18 @@ def initial_rank(user_preds):
         pd.DataFrame: DataFrame with additional columns for user rank and z-score
         Filters for top 300 predictions per user
     """
-    user_preds_ranked = (
-        user_preds
-        .sort_values(
-            ["predicted_rating"],
-            ascending=[False]
-        )
-        .reset_index(drop=True)
-    )
+    predicted_rating = user_preds["predicted_rating"]
+    user_preds_ranked = user_preds.nlargest(
+        300, "predicted_rating", keep="first"
+    ).reset_index(drop=True)
     user_preds_ranked["user_rank"] = (
         user_preds_ranked["predicted_rating"]
         .rank(method="first", ascending=False)
         .astype(int)
     )
     user_preds_ranked["z_score"] = (
-        user_preds_ranked["predicted_rating"] - user_preds_ranked["predicted_rating"].mean()
-    ) / user_preds_ranked["predicted_rating"].std()
-
-    # keep top 300 per user
-    user_preds_ranked = user_preds_ranked[
-        user_preds_ranked["user_rank"] <= 300
-    ]
+        user_preds_ranked["predicted_rating"] - predicted_rating.mean()
+    ) / predicted_rating.std()
     return user_preds_ranked
 
 def main():

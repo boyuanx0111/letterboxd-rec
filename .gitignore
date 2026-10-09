@@ -14,9 +14,18 @@ htmlcov/
 .env
 .env.*
 !.env.example
+!.env.deploy.example
 *.log
 *.tmp
-data/
+# Data exports, caches, training intermediates, and local datasets. Whitelist
+# only the small artifacts required by the current inference path.
+data/*
+!data/genre_columns.csv
+!data/movie_feature_frame.parquet
+!data/norm_movie_embeddings_nn.parquet
+data/letterboxd/
+data/ml-32m/
+data/sample-letterboxd/
 
 # Frontend dependencies and generated bundles
 frontend/node_modules/
@@ -27,5 +36,6 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Local Python installer kept outside the source tree
+# Local installers and IDE state
 Miniconda3-latest-Windows-x86_64.exe
+.vscode/

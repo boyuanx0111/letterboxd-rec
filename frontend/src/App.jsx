@@ -88,7 +88,19 @@ function App() {
           {loading ? "Matching your films..." : "Get recommendations"}
         </button>
 
-        {loading && <p className="loading-copy">Looking up film IDs and ranking your matches.</p>}
+        {loading && (
+          <div className="loading-status" role="status" aria-live="polite">
+            <p className="loading-copy">Looking up film IDs and ranking your matches.</p>
+            <div
+              className="loading-track"
+              role="progressbar"
+              aria-label="Calculating your recommendations"
+              aria-valuetext="Calculation in progress"
+            >
+              <span className="loading-indicator" />
+            </div>
+          </div>
+        )}
         {error && <p className="error-message" role="alert">{error}</p>}
       </section>
 

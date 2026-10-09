@@ -28,8 +28,11 @@ import pandas as pd
 MAX_CONCURRENT_REQUESTS = 10
 DEFAULT_TIMEOUT_SECONDS = 20
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
-DEFAULT_CACHE_PATH = (
-    Path(__file__).resolve().parents[2] / "data" / "letterboxd" / "cache.json"
+DEFAULT_CACHE_PATH = Path(
+    os.getenv(
+        "LETTERBOXD_CACHE_PATH",
+        str(Path(__file__).resolve().parents[2] / "data" / "letterboxd" / "cache.json"),
+    )
 )
 
 _ALLOWED_HOSTS = {"boxd.it", "letterboxd.com", "www.letterboxd.com"}

@@ -126,6 +126,21 @@ The final ranking stage is `XGBRanker`.
 - `z_score`
 - `genre_affinity`
 - `decade_affinity`
+- `Original_Language_affinity`
+- `Origin_country_affinity`
+- `Director_affinity`
+- `Top_cast_affinity`
+- `Keyword_affinity`
+- `Overview_affinity`
+- `Production_company_affinity`
+- `vote_count_affinity`
+- `vote_average_affinity`
+- `revenue_affinity`
+
+The enriched affinities are calculated in Notebook 3 from train-only user ratings.
+Categorical and overview affinities average the user's historical rating preference
+for matching tokens, while numeric affinities measure the distance from the user's
+rating-weighted preference after skew correction and standardization.
 
 ---
 

@@ -92,7 +92,9 @@ def hybrid_recommend(user_ratings):
     stat_cols = ["user_avg_rating", "user_std_rating","user_count_rating"]
     for col in stat_cols:
         candidate_preds[col] = user_feature_frame[col].iloc[0]
-        
+
+    candidate_preds = candidate_preds.reset_index(drop=True)
+    
     candidate_preds = candidate_preds.merge(movie_feature_frame[["movie_Release_Year"]], left_on="tmdbId", right_index=True, how="left")
 
     # calc genre affinity for each user-movie pair

@@ -68,6 +68,8 @@ candidate_preds = pd.DataFrame({
     # movie_Release_Year
     # genre_affinity
     # decade_affinity
+    # Original_Language_affinity, 
+    #"Origin_country_affinity", 
     "predicted_rating": predictions
 })
 candidate_preds = candidate_preds.merge(user_feature_frame[["user_avg_rating", "user_std_rating", "user_count_rating"]], on="userId", how="left")

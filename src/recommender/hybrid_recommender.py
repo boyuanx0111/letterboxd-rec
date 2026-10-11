@@ -28,6 +28,7 @@ def hybrid_recommend(user_ratings):
     from xgboost import XGBRegressor
     import xgboost as xgb
     from sklearn.metrics import ndcg_score
+    from .cf import cf_predict_new_user
 
     # preprocess test data to tt-nn input
 
@@ -49,6 +50,21 @@ def hybrid_recommend(user_ratings):
 
     user_scaler = joblib.load(MODEL_DIR / 'scaler_users.pkl')
     y_scaler = joblib.load(MODEL_DIR / 'scaler_y.pkl')
+
+    # Match the exact feature names and order used when the scaler was fitted.
+    user_feature_cols = getattr(user_scaler, "feature_names_in_", None)
+    if user_feature_cols is None:
+        user_feature_cols = np.load(DATA_DIR / "user_cols.npy", allow_pickle=True)
+    user_feature_cols = list(user_feature_cols)
+    missing_user_features = [
+        col for col in user_feature_cols if col not in user_feature_frame.columns
+    ]
+    if missing_user_features:
+        raise ValueError(
+            "Built user features are missing scaler columns: "
+            f"{missing_user_features}"
+        )
+    user_feature_frame = user_feature_frame.loc[:, user_feature_cols]
 
     # create user embeddings from user feature frame using userNN model
     user_feature_scaled = user_scaler.transform(user_feature_frame)
@@ -89,7 +105,7 @@ def hybrid_recommend(user_ratings):
         "predicted_rating": predictions
     })
 
-    stat_cols = ["user_avg_rating", "user_std_rating","user_count_rating"]
+    stat_cols = ["user_avg_rating", "user_std_rating", "user_count_rating"]
     for col in stat_cols:
         candidate_preds[col] = user_feature_frame[col].iloc[0]
 
@@ -144,8 +160,94 @@ def hybrid_recommend(user_ratings):
         where=decade_counts != 0
     )
 
+    # calc language and country affinity features used to train XGBoost.
+    user_language_cols = [f"user_tmdb_{i}_avg" for i in range(1, 12)]
+    movie_language_cols = [f"movie_tmdb_{i}" for i in range(1, 12)]
+    user_language_values = user_feature_frame[user_language_cols].fillna(0).to_numpy()
+    movie_language_values = (
+        movie_feature_frame
+        .loc[candidate_preds["tmdbId"], movie_language_cols]
+        .fillna(0)
+        .to_numpy()
+    )
+    language_counts = movie_language_values.sum(axis=1)
+    candidate_preds["Original_Language_affinity"] = np.divide(
+        (user_language_values * movie_language_values).sum(axis=1),
+        language_counts,
+        out=np.full(len(candidate_preds), np.nan),
+        where=language_counts != 0,
+    )
+
+    user_country_cols = [f"user_tmdb_{i}" for i in range(12, 27)]
+    movie_country_cols = [f"movie_tmdb_{i}" for i in range(12, 27)]
+    user_country_values = user_feature_frame[user_country_cols].fillna(0).to_numpy()
+    movie_country_values = (
+        movie_feature_frame
+        .loc[candidate_preds["tmdbId"], movie_country_cols]
+        .fillna(0)
+        .to_numpy()
+    )
+    country_counts = movie_country_values.sum(axis=1)
+    candidate_preds["Origin_country_affinity"] = np.divide(
+        (user_country_values * movie_country_values).sum(axis=1),
+        country_counts,
+        out=np.full(len(candidate_preds), np.nan),
+        where=country_counts != 0,
+    )
+
+    # test
+    # Calculate SVD content affinity for each user-movie pair
+    # User: user_svd_0 to user_svd_149
+    # Movie: movie_tmdb_411 to movie_tmdb_560
+
+    user_svd_cols = [f"user_user_svd_{i}" for i in range(150)]
+    movie_svd_cols = [f"movie_tmdb_{i}" for i in range(411, 561)]
+
+    # User SVD embedding (1, 150)
+    user_svd_values = (
+        user_feature_frame[user_svd_cols]
+        .fillna(0)
+        .to_numpy(dtype=float)[0]
+    )
+
+    # Candidate movie SVD embeddings (n_movies, 150)
+    movie_svd_values = (
+        movie_feature_frame
+        .loc[candidate_preds["tmdbId"], movie_svd_cols]
+        .fillna(0)
+        .to_numpy(dtype=float)
+    )
+
+    # Cosine similarity
+    dot_products = movie_svd_values @ user_svd_values
+
+    user_norm = np.linalg.norm(user_svd_values)
+    movie_norms = np.linalg.norm(movie_svd_values, axis=1)
+
+    denominators = movie_norms * user_norm
+
+    candidate_preds["svd_affinity"] = np.divide(
+        dot_products,
+        denominators,
+        out=np.zeros(len(candidate_preds)),
+        where=denominators > 0
+    )
+    # test
+
     # build candidate_preds_ranked dataframe for xgboost input
     candidate_preds_ranked = initial_rank(candidate_preds)
+
+    # Load collaborative filtering model
+    cf_model = joblib.load(
+        MODEL_DIR / "collaborative_filtering.pkl"
+    )
+
+    # Predict ratings for top 300 candidates
+    candidate_preds_ranked["cf_pred"] = cf_predict_new_user(
+        cf_model,
+        user_ratings,
+        candidate_preds_ranked["tmdbId"].to_numpy()
+    )
 
     # loading xgboost features 
     xgbmodel = xgb.XGBRanker()

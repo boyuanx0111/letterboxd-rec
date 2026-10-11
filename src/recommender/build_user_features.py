@@ -101,14 +101,21 @@ def build_user_features(ratings, movie_feature_frame):
     # tmdb_561 = vote_count
     # tmdb_562 = vote_average
     # tmdb_563 = revenue
+    # tmdb_564 = popularity
 
     numeric_tmdb_features = {
         "vote_count": "movie_tmdb_561",
         "vote_average": "movie_tmdb_562",
-        "revenue": "movie_tmdb_563"
+        "revenue": "movie_tmdb_563",
+        "popularity": "movie_tmdb_564"
     }
 
-    # Only include movies that the user has rated
+    #user stats
+    users_encoded["avg_rating"] = ratings["rating"].mean()
+    users_encoded["std_rating"] = ratings["rating"].std()
+    users_encoded["count_rating"] = ratings["rating"].count()
+
+# Only include movies that the user has rated
     rated_movie_features = movie_feature_frame.reindex(ratings.index)
 
     for feature_name, movie_col in numeric_tmdb_features.items():
@@ -117,14 +124,41 @@ def build_user_features(ratings, movie_feature_frame):
             rated_movie_features[movie_col].mean()
         )
 
-    users_encoded["avg_rating"] = ratings["rating"].mean()
-    users_encoded["std_rating"] = ratings["rating"].std()
-    users_encoded["count_rating"] = ratings["rating"].count()
+    # Average SVD embeddings for movies rated >= 4 stars
+    # movie_tmdb_411 to movie_tmdb_560 (150 dimensions)
+
+    svd_cols = [f"movie_tmdb_{i}" for i in range(411, 561)]
+
+    liked_ratings = ratings[ratings["rating"] >= 4.0]
+
+    # Match liked movies with their SVD embeddings
+    liked_movie_svd = movie_feature_frame.reindex(liked_ratings.index)[svd_cols]
+
+    # Calculate average SVD embedding
+    avg_svd = liked_movie_svd.mean(axis=0)
+
+    # Create user SVD features
+    svd_features = pd.DataFrame(
+        [avg_svd.to_numpy()],
+        columns=[f"user_svd_{i}" for i in range(150)],
+        index=users_encoded.index
+    )
+
+    # Add all 150 features at once
+    users_encoded = pd.concat([users_encoded, svd_features], axis=1)
 
     users_encoded = users_encoded.fillna(0)
-
+        
     user_feature_frame = users_encoded.rename(
-        columns={col: f"user_{col}" for col in users_encoded.columns}
+        columns={
+            col: (
+                f"user_{col}"
+                if col.startswith(("user_svd_"))
+                else f"user_{col}" if not col.startswith("user_")
+                else col
+            )
+            for col in users_encoded.columns
+        }
     )
 
     return user_feature_frame

@@ -177,5 +177,4 @@ candidate_preds_ranked.to_parquet(
 
 #TODO:
 #XGboost remaining features
-# - cosine similarity (AP)
 # Collab Filtering Hybrid (AP) 

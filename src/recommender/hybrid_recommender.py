@@ -236,6 +236,22 @@ def hybrid_recommend(user_ratings):
 
     # build candidate_preds_ranked dataframe for xgboost input
     candidate_preds_ranked = initial_rank(candidate_preds)
+ 
+    # Movie popularity from TMDB metadata enhance
+    candidate_preds_ranked["popularity"] = (
+        movie_feature_frame
+        .reindex(candidate_preds_ranked["tmdbId"])["movie_tmdb_564"]
+        .to_numpy()
+    )
+
+    # User's average popularity preference
+    user_popularity = user_feature_frame["user_popularity"].iloc[0]
+
+    # Personalised popularity affinity
+    candidate_preds_ranked["pop_affinity"] = -np.abs(
+        np.log1p(candidate_preds_ranked["popularity"].clip(lower=0))
+        - np.log1p(max(user_popularity, 0))
+    )
 
     # Load collaborative filtering model
     cf_model = joblib.load(
@@ -257,28 +273,58 @@ def hybrid_recommend(user_ratings):
     feature_cols = xgbmodel.get_booster().feature_names
     xgboost_input = xgboost_input[feature_cols]
 
-    candidate_preds_ranked["xgb_predicted_rating"] = xgbmodel.predict(xgboost_input)
+    # XGBRanker predictions
+    candidate_preds_ranked["xgb_score"] = xgbmodel.predict(xgboost_input)
 
-    candidate_preds_ranked["xgb_rank"] = (
-        candidate_preds_ranked["xgb_predicted_rating"]
-        .rank(method="first", ascending=False)
+        # Normalise each signal using percentile ranks
+    candidate_preds_ranked["xgb_norm"] = (
+        candidate_preds_ranked["xgb_score"].rank(pct=True)
     )
 
-    # keep top 10 recs per user from xgboost ranked predictions
-    xgb_preds_ranked = (
-        candidate_preds_ranked[
-            candidate_preds_ranked["xgb_rank"] <= 10
-        ]
-        .sort_values(
-            ["xgb_rank"],
-            ascending=[True]
-        )
+    candidate_preds_ranked["cf_norm"] = (
+        candidate_preds_ranked["cf_pred"].rank(pct=True)
+    )
+
+    candidate_preds_ranked["pop_affinity_norm"] = (
+        candidate_preds_ranked["pop_affinity"].rank(pct=True)
+    )
+
+    # Weighted hybrid score
+    candidate_preds_ranked["hybrid_score"] = (
+        0.50 * candidate_preds_ranked["xgb_norm"]
+        + 0.40 * candidate_preds_ranked["cf_norm"]
+        +0.10 * candidate_preds_ranked["pop_affinity_norm"]
+    )
+
+    # Final ranking
+    candidate_preds_ranked["hybrid_rank"] = (
+        candidate_preds_ranked["hybrid_score"]
+        .rank(method="first", ascending=False)
+    )
+    # Select top 10 using hybrid score
+    hybrid_preds_ranked = (
+        candidate_preds_ranked
+        .sort_values("hybrid_score", ascending=False)
+        .head(10)
         .reset_index(drop=True)
     )
 
-    # merge tmdbId with movie titles for display
-    xgb_preds_ranked = xgb_preds_ranked.merge(movie_feature_frame[["movie_title"]], left_on="tmdbId", right_index=True, how="left")
-    result = xgb_preds_ranked[["tmdbId", "movie_title", "xgb_rank"]].head(10)
+    # Keep xgb_rank column name for frontend compatibility
+    hybrid_preds_ranked["xgb_rank"] = np.arange(1, len(hybrid_preds_ranked) + 1)
+
+    # Merge movie titles
+    hybrid_preds_ranked = hybrid_preds_ranked.merge(
+        movie_feature_frame[["movie_title"]],
+        left_on="tmdbId",
+        right_index=True,
+        how="left"
+    )
+
+    # Required frontend output
+    result = hybrid_preds_ranked[
+        ["tmdbId", "movie_title", "xgb_rank"]
+    ].copy()
+
     result.attrs["catalogue_rows"] = len(user_ratings)
 
     return result

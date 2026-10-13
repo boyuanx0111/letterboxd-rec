@@ -1,4 +1,4 @@
-# Optional dependencies used across the exploratory/training notebooks.
+# Install after requirements.txt for notebook and feature-engineering work.
 -r runtime.txt
 
 matplotlib==3.10.8

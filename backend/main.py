@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -15,7 +16,6 @@ from src.parser import (
     enrich_letterboxd_csv,
 )
 from src.recommender.hybrid_recommender import hybrid_recommend
-
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 1024 * 1024
@@ -32,6 +32,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 def root():
     return {"message": "Letterboxd recommender API is running"}
@@ -39,7 +40,7 @@ def root():
 
 @app.post("/recommend")
 async def get_recommendations(
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),  # noqa: B008 - FastAPI reads File metadata from defaults.
 ):
     temp_path = None
 
@@ -82,9 +83,7 @@ async def get_recommendations(
         except LetterboxdMappingError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-        import_summary = dict(
-            enriched_ratings.attrs.get("import_summary", {})
-        )
+        import_summary = dict(enriched_ratings.attrs.get("import_summary", {}))
         import_summary.setdefault("usable_rows", len(enriched_ratings))
         import_summary.setdefault("total_rows", len(enriched_ratings))
 
@@ -122,8 +121,12 @@ async def get_recommendations(
 
         return {
             "recommendations": json.loads(
-                recommendations[["tmdbId", "movie_title", "xgb_rank"]]
-                .to_json(orient="records")
+                cast(
+                    str,
+                    recommendations[["tmdbId", "movie_title", "xgb_rank"]].to_json(
+                        orient="records"
+                    ),
+                )
             ),
             "import_summary": import_summary,
         }

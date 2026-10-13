@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.linalg import solve
 
+# run before training cf model
+
 
 def cf_predict_new_user(cf_model, user_ratings, candidate_ids, reg=10.0):
 
@@ -11,7 +13,6 @@ def cf_predict_new_user(cf_model, user_ratings, candidate_ids, reg=10.0):
 
     # Get embeddings for movies the user has rated
     for _, row in user_ratings.iterrows():
-
         try:
             movie_id = trainset.to_inner_iid(int(row["tmdbId"]))
         except (ValueError, TypeError, OverflowError):
@@ -19,27 +20,17 @@ def cf_predict_new_user(cf_model, user_ratings, candidate_ids, reg=10.0):
 
         movie_vectors.append(cf_model.qi[movie_id])
 
-        targets.append(
-            float(row["rating"])
-            - trainset.global_mean
-            - cf_model.bi[movie_id]
-        )
+        targets.append(float(row["rating"]) - trainset.global_mean - cf_model.bi[movie_id])
 
     # Fallback if no rated movies exist in CF
     if not movie_vectors:
-        return np.full(
-            len(candidate_ids),
-            trainset.global_mean
-        )
+        return np.full(len(candidate_ids), trainset.global_mean)
 
     Q = np.asarray(movie_vectors, dtype=np.float64)
     y = np.asarray(targets, dtype=np.float64)
 
     # Estimate user bias and latent embedding
-    X = np.column_stack([
-        np.ones(len(Q)),
-        Q
-    ])
+    X = np.column_stack([np.ones(len(Q)), Q])
 
     # Ridge regularisation
     reg_matrix = reg * np.eye(X.shape[1])
@@ -48,31 +39,18 @@ def cf_predict_new_user(cf_model, user_ratings, candidate_ids, reg=10.0):
     # Calculate X.T @ X without BLAS
     n_features = X.shape[1]
 
-    A = np.empty(
-        (n_features, n_features),
-        dtype=np.float64
-    )
+    A = np.empty((n_features, n_features), dtype=np.float64)
 
     for i in range(n_features):
-        A[i, :] = np.sum(
-            X[:, i, None] * X,
-            axis=0
-        )
+        A[i, :] = np.sum(X[:, i, None] * X, axis=0)
 
     A += reg_matrix
 
     # Calculate X.T @ y without BLAS
-    b = np.sum(
-        X * y[:, None],
-        axis=0
-    )
+    b = np.sum(X * y[:, None], axis=0)
 
     # Solve for user bias and embedding
-    user_params = solve(
-        A,
-        b,
-        assume_a="pos"
-    )
+    user_params = solve(A, b, assume_a="pos")
 
     user_bias = user_params[0]
     user_embedding = user_params[1:]
@@ -81,7 +59,6 @@ def cf_predict_new_user(cf_model, user_ratings, candidate_ids, reg=10.0):
     predictions = []
 
     for tmdb_id in candidate_ids:
-
         try:
             movie_id = trainset.to_inner_iid(int(tmdb_id))
 
@@ -89,16 +66,12 @@ def cf_predict_new_user(cf_model, user_ratings, candidate_ids, reg=10.0):
                 trainset.global_mean
                 + user_bias
                 + cf_model.bi[movie_id]
-                + np.sum(
-                    user_embedding * cf_model.qi[movie_id]
-                )
+                + np.sum(user_embedding * cf_model.qi[movie_id])
             )
 
         except (ValueError, TypeError, OverflowError):
             pred = trainset.global_mean + user_bias
 
-        predictions.append(
-            np.clip(pred, 0.5, 5.0)
-        )
+        predictions.append(np.clip(pred, 0.5, 5.0))
 
     return np.asarray(predictions)

@@ -1,8 +1,9 @@
-# hybrid rec pipeline 
+# hybrid rec pipeline
 # tt-nn filters top 300 per user, then xgboost ranks and filters top 10
-# input parsed user ratings (tmdbId, rating) to build user features and embeddings, then score all movies and rank with xgboost
+# Input ratings build user features and embeddings, then score and rank movies.
 
 from pathlib import Path
+
 
 def hybrid_recommend(user_ratings):
 
@@ -11,24 +12,23 @@ def hybrid_recommend(user_ratings):
     MODEL_DIR = ROOT_DIR / "models"
 
     """
-    Recommender pipeline that combines a neural network for initial ranking and an XGBoost model for final ranking.
+    Recommender pipeline combining neural network and XGBoost rankings.
     Input: 
     - user_ratings:  containing user ratings with columns 'tmdbId' and 'rating'.
     Output:
-    - DataFrame containing the top 10 recommended movies for the user, with columns 'tmdbId', 'movie_title', and 'xgb_rank'.
+    - DataFrame containing top recommendations and their movie IDs and ranks.
     """
 
-    import pandas as pd
     import joblib
     import numpy as np
+    import pandas as pd
     import tensorflow as tf
-    from tensorflow.keras.models import load_model
-    from .pipelinept1 import initial_rank
-    from .build_user_features import build_user_features
-    from xgboost import XGBRegressor
     import xgboost as xgb
-    from sklearn.metrics import ndcg_score
+    from tensorflow.keras.models import load_model
+
+    from .build_user_features import build_user_features
     from .cf import cf_predict_new_user
+    from .pipelinept1 import initial_rank
 
     # preprocess test data to tt-nn input
 
@@ -48,8 +48,8 @@ def hybrid_recommend(user_ratings):
     # users feature frame from USER INPUT
     user_feature_frame = build_user_features(user_ratings, movie_feature_frame)
 
-    user_scaler = joblib.load(MODEL_DIR / 'scaler_users.pkl')
-    y_scaler = joblib.load(MODEL_DIR / 'scaler_y.pkl')
+    user_scaler = joblib.load(MODEL_DIR / "scaler_users.pkl")
+    y_scaler = joblib.load(MODEL_DIR / "scaler_y.pkl")
 
     # Match the exact feature names and order used when the scaler was fitted.
     user_feature_cols = getattr(user_scaler, "feature_names_in_", None)
@@ -60,25 +60,24 @@ def hybrid_recommend(user_ratings):
         col for col in user_feature_cols if col not in user_feature_frame.columns
     ]
     if missing_user_features:
-        raise ValueError(
-            "Built user features are missing scaler columns: "
-            f"{missing_user_features}"
-        )
+        raise ValueError(f"Built user features are missing scaler columns: {missing_user_features}")
     user_feature_frame = user_feature_frame.loc[:, user_feature_cols]
 
     # create user embeddings from user feature frame using userNN model
     user_feature_scaled = user_scaler.transform(user_feature_frame)
-    userNN = load_model(MODEL_DIR / 'userNN.keras')
+    userNN = load_model(MODEL_DIR / "userNN.keras")
     user_embeddings = userNN.predict(user_feature_scaled)
     user_embeddings_df = pd.DataFrame(user_embeddings, index=user_feature_frame.index)
 
     # predict
     # movie_embeddings - (87585, 32)
-    # user_embeddings - 
+    # user_embeddings -
     user_vecs = user_embeddings_df.to_numpy()
     # create unwatched movie list of tmdbIds for user to extract corresponding movie embeddings
     movie_vecs = norm_movie_embeddings[~norm_movie_embeddings.index.isin(user_ratings["tmdbId"])]
-    candidate_movie_ids = norm_movie_embeddings.index[~norm_movie_embeddings.index.isin(user_ratings["tmdbId"])]
+    candidate_movie_ids = norm_movie_embeddings.index[
+        ~norm_movie_embeddings.index.isin(user_ratings["tmdbId"])
+    ]
 
     # normalise user before dot product (movie already normalised)
     user_vecs = tf.keras.ops.normalize(user_vecs, axis=1)
@@ -92,72 +91,62 @@ def hybrid_recommend(user_ratings):
     embedding_cosine_similarity = np.clip(movie_vecs @ user_vecs[0], -1.0, 1.0)
     predictions_scaled = embedding_cosine_similarity
 
-    #build candidate_preds dataframe for xgboost input
-    candidate_preds = pd.DataFrame({
-        "tmdbId": candidate_movie_ids.to_numpy(),
-        # user_avg rating
-        # user_std rating
-        # user_count rating
-        # movie_Release_Year
-        # genre_affinity
-        # decade_affinity
-        "embedding_cosine_similarity": embedding_cosine_similarity,
-        "predicted_rating": predictions
-    })
+    # build candidate_preds dataframe for xgboost input
+    candidate_preds = pd.DataFrame(
+        {
+            "tmdbId": candidate_movie_ids.to_numpy(),
+            # user_avg rating
+            # user_std rating
+            # user_count rating
+            # movie_Release_Year
+            # genre_affinity
+            # decade_affinity
+            "embedding_cosine_similarity": embedding_cosine_similarity,
+            "predicted_rating": predictions,
+        }
+    )
 
     stat_cols = ["user_avg_rating", "user_std_rating", "user_count_rating"]
     for col in stat_cols:
         candidate_preds[col] = user_feature_frame[col].iloc[0]
 
     candidate_preds = candidate_preds.reset_index(drop=True)
-    
-    candidate_preds = candidate_preds.merge(movie_feature_frame[["movie_Release_Year"]], left_on="tmdbId", right_index=True, how="left")
+
+    candidate_preds = candidate_preds.merge(
+        movie_feature_frame[["movie_Release_Year"]], left_on="tmdbId", right_index=True, how="left"
+    )
 
     # calc genre affinity for each user-movie pair
-    genre_columns = pd.read_csv(DATA_DIR / "genre_columns.csv").squeeze().tolist()
+    genre_columns = pd.read_csv(DATA_DIR / "genre_columns.csv").iloc[:, 0].tolist()
     user_genre_cols = [f"user_{genre}" for genre in genre_columns]
     movie_genre_cols = [f"movie_{genre}" for genre in genre_columns]
-    user_genre_values = (
-        user_feature_frame
-        .loc[:, user_genre_cols]
-        .fillna(0)
-        .to_numpy()
-    )
+    user_genre_values = user_feature_frame.loc[:, user_genre_cols].fillna(0).to_numpy()
     movie_genre_values = (
-        movie_feature_frame
-        .loc[candidate_preds["tmdbId"], movie_genre_cols]
-        .fillna(0)
-        .to_numpy()
+        movie_feature_frame.loc[candidate_preds["tmdbId"], movie_genre_cols].fillna(0).to_numpy()
     )
     genre_counts = movie_genre_values.sum(axis=1)
     candidate_preds["genre_affinity"] = np.divide(
-        (user_genre_values * movie_genre_values).sum(axis=1), 
+        (user_genre_values * movie_genre_values).sum(axis=1),
         genre_counts,
         out=np.full(len(candidate_preds), np.nan),
-        where=genre_counts != 0
+        where=genre_counts != 0,
     )
 
     # calc decade affinity for each user-movie pair
-    movie_decade_cols = [col for col in movie_feature_frame.columns if col.startswith("movie_Decade_")]
+    movie_decade_cols = [
+        col for col in movie_feature_frame.columns if col.startswith("movie_Decade_")
+    ]
     user_decade_cols = [col for col in user_feature_frame.columns if col.startswith("user_Decade_")]
-    user_decade_values = (
-        user_feature_frame
-        .loc[:, user_decade_cols]
-        .fillna(0)
-        .to_numpy()
-    )
+    user_decade_values = user_feature_frame.loc[:, user_decade_cols].fillna(0).to_numpy()
     movie_decade_values = (
-        movie_feature_frame
-        .loc[candidate_preds["tmdbId"], movie_decade_cols]
-        .fillna(0)
-        .to_numpy()
+        movie_feature_frame.loc[candidate_preds["tmdbId"], movie_decade_cols].fillna(0).to_numpy()
     )
     decade_counts = movie_decade_values.sum(axis=1)
     candidate_preds["decade_affinity"] = np.divide(
         (user_decade_values * movie_decade_values).sum(axis=1),
         decade_counts,
         out=np.full(len(candidate_preds), np.nan),
-        where=decade_counts != 0
+        where=decade_counts != 0,
     )
 
     # calc language and country affinity features used to train XGBoost.
@@ -165,10 +154,7 @@ def hybrid_recommend(user_ratings):
     movie_language_cols = [f"movie_tmdb_{i}" for i in range(1, 12)]
     user_language_values = user_feature_frame[user_language_cols].fillna(0).to_numpy()
     movie_language_values = (
-        movie_feature_frame
-        .loc[candidate_preds["tmdbId"], movie_language_cols]
-        .fillna(0)
-        .to_numpy()
+        movie_feature_frame.loc[candidate_preds["tmdbId"], movie_language_cols].fillna(0).to_numpy()
     )
     language_counts = movie_language_values.sum(axis=1)
     candidate_preds["Original_Language_affinity"] = np.divide(
@@ -182,10 +168,7 @@ def hybrid_recommend(user_ratings):
     movie_country_cols = [f"movie_tmdb_{i}" for i in range(12, 27)]
     user_country_values = user_feature_frame[user_country_cols].fillna(0).to_numpy()
     movie_country_values = (
-        movie_feature_frame
-        .loc[candidate_preds["tmdbId"], movie_country_cols]
-        .fillna(0)
-        .to_numpy()
+        movie_feature_frame.loc[candidate_preds["tmdbId"], movie_country_cols].fillna(0).to_numpy()
     )
     country_counts = movie_country_values.sum(axis=1)
     candidate_preds["Origin_country_affinity"] = np.divide(
@@ -204,16 +187,11 @@ def hybrid_recommend(user_ratings):
     movie_svd_cols = [f"movie_tmdb_{i}" for i in range(411, 561)]
 
     # User SVD embedding (1, 150)
-    user_svd_values = (
-        user_feature_frame[user_svd_cols]
-        .fillna(0)
-        .to_numpy(dtype=float)[0]
-    )
+    user_svd_values = user_feature_frame[user_svd_cols].fillna(0).to_numpy(dtype=float)[0]
 
     # Candidate movie SVD embeddings (n_movies, 150)
     movie_svd_values = (
-        movie_feature_frame
-        .loc[candidate_preds["tmdbId"], movie_svd_cols]
+        movie_feature_frame.loc[candidate_preds["tmdbId"], movie_svd_cols]
         .fillna(0)
         .to_numpy(dtype=float)
     )
@@ -227,22 +205,17 @@ def hybrid_recommend(user_ratings):
     denominators = movie_norms * user_norm
 
     candidate_preds["svd_affinity"] = np.divide(
-        dot_products,
-        denominators,
-        out=np.zeros(len(candidate_preds)),
-        where=denominators > 0
+        dot_products, denominators, out=np.zeros(len(candidate_preds)), where=denominators > 0
     )
     # test
 
     # build candidate_preds_ranked dataframe for xgboost input
     candidate_preds_ranked = initial_rank(candidate_preds)
- 
+
     # Movie popularity from TMDB metadata enhance
-    candidate_preds_ranked["vote_count"] = (
-        movie_feature_frame
-        .reindex(candidate_preds_ranked["tmdbId"])["movie_tmdb_561"]
-        .to_numpy()
-    )
+    candidate_preds_ranked["vote_count"] = movie_feature_frame.reindex(
+        candidate_preds_ranked["tmdbId"]
+    )["movie_tmdb_561"].to_numpy()
 
     # User's average vote count preference
     user_vote_count = user_feature_frame["user_vote_count"].iloc[0]
@@ -254,18 +227,14 @@ def hybrid_recommend(user_ratings):
     )
 
     # Load collaborative filtering model
-    cf_model = joblib.load(
-        MODEL_DIR / "collaborative_filtering.pkl"
-    )
+    cf_model = joblib.load(MODEL_DIR / "collaborative_filtering.pkl")
 
     # Predict ratings for top 300 candidates
     candidate_preds_ranked["cf_pred"] = cf_predict_new_user(
-        cf_model,
-        user_ratings,
-        candidate_preds_ranked["tmdbId"].to_numpy()
+        cf_model, user_ratings, candidate_preds_ranked["tmdbId"].to_numpy()
     )
 
-    # loading xgboost features 
+    # loading xgboost features
     xgbmodel = xgb.XGBRanker()
     xgbmodel.load_model(MODEL_DIR / "xgboostranker_model.json")
 
@@ -276,35 +245,29 @@ def hybrid_recommend(user_ratings):
     # XGBRanker predictions
     candidate_preds_ranked["xgb_score"] = xgbmodel.predict(xgboost_input)
 
-        # Normalise each signal using percentile ranks
-    candidate_preds_ranked["xgb_norm"] = (
-        candidate_preds_ranked["xgb_score"].rank(pct=True)
-    )
+    # Normalise each signal using percentile ranks
+    candidate_preds_ranked["xgb_norm"] = candidate_preds_ranked["xgb_score"].rank(pct=True)
 
-    candidate_preds_ranked["cf_norm"] = (
-        candidate_preds_ranked["cf_pred"].rank(pct=True)
-    )
+    candidate_preds_ranked["cf_norm"] = candidate_preds_ranked["cf_pred"].rank(pct=True)
 
-    candidate_preds_ranked["pop_affinity_norm"] = (
-        candidate_preds_ranked["pop_affinity"].rank(pct=True)
+    candidate_preds_ranked["pop_affinity_norm"] = candidate_preds_ranked["pop_affinity"].rank(
+        pct=True
     )
 
     # Weighted hybrid score
     candidate_preds_ranked["hybrid_score"] = (
         0.50 * candidate_preds_ranked["xgb_norm"]
         + 0.40 * candidate_preds_ranked["cf_norm"]
-        +0.10 * candidate_preds_ranked["pop_affinity_norm"]
+        + 0.10 * candidate_preds_ranked["pop_affinity_norm"]
     )
 
     # Final ranking
-    candidate_preds_ranked["hybrid_rank"] = (
-        candidate_preds_ranked["hybrid_score"]
-        .rank(method="first", ascending=False)
+    candidate_preds_ranked["hybrid_rank"] = candidate_preds_ranked["hybrid_score"].rank(
+        method="first", ascending=False
     )
     # Select top 10 using hybrid score
     hybrid_preds_ranked = (
-        candidate_preds_ranked
-        .sort_values("hybrid_score", ascending=False)
+        candidate_preds_ranked.sort_values("hybrid_score", ascending=False)
         .head(20)
         .reset_index(drop=True)
     )
@@ -314,16 +277,11 @@ def hybrid_recommend(user_ratings):
 
     # Merge movie titles
     hybrid_preds_ranked = hybrid_preds_ranked.merge(
-        movie_feature_frame[["movie_title"]],
-        left_on="tmdbId",
-        right_index=True,
-        how="left"
+        movie_feature_frame[["movie_title"]], left_on="tmdbId", right_index=True, how="left"
     )
 
     # Required frontend output
-    result = hybrid_preds_ranked[
-        ["tmdbId", "movie_title", "xgb_rank"]
-    ].copy()
+    result = hybrid_preds_ranked[["tmdbId", "movie_title", "xgb_rank"]].copy()
 
     result.attrs["catalogue_rows"] = len(user_ratings)
 

@@ -17,13 +17,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 import pandas as pd
-
 
 MAX_CONCURRENT_REQUESTS = 10
 DEFAULT_TIMEOUT_SECONDS = 20
@@ -53,6 +52,7 @@ class LetterboxdParserError(ValueError):
 
 class LetterboxdMappingError(RuntimeError):
     """Raised when Letterboxd pages cannot be mapped to TMDB IDs."""
+
 
 # Small data class for the identifiers associated with a title.
 @dataclass(frozen=True)
@@ -97,9 +97,7 @@ def _normalise_url(value: Any) -> str:
     parsed = urlparse(url)
 
     if parsed.scheme != "https" or (parsed.hostname or "").casefold() not in _ALLOWED_HOSTS:
-        raise LetterboxdParserError(
-            "Every unmapped row must contain an HTTPS Letterboxd URI."
-        )
+        raise LetterboxdParserError("Every unmapped row must contain an HTTPS Letterboxd URI.")
 
     return url
 
@@ -168,15 +166,11 @@ def _fetch_external_ids(url: str, timeout: float) -> ExternalIds:
 
             content_length = response.headers.get("Content-Length")
             if content_length and int(content_length) > MAX_RESPONSE_BYTES:
-                raise LetterboxdMappingError(
-                    "The Letterboxd page was larger than expected."
-                )
+                raise LetterboxdMappingError("The Letterboxd page was larger than expected.")
             charset = response.headers.get_content_charset() or "utf-8"
             body = response.read(MAX_RESPONSE_BYTES + 1)
             if len(body) > MAX_RESPONSE_BYTES:
-                raise LetterboxdMappingError(
-                    "The Letterboxd page was larger than expected."
-                )
+                raise LetterboxdMappingError("The Letterboxd page was larger than expected.")
             html = body.decode(charset, errors="replace")
     except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
         raise LetterboxdMappingError(f"Could not fetch {url}: {exc}") from exc
@@ -220,7 +214,7 @@ def _decode_cache_value(value: Any) -> ExternalIds | None:
         return None
 
     try:
-        parsed_tmdb_id = int(tmdb_id)
+        parsed_tmdb_id = int(str(tmdb_id))
     except (TypeError, ValueError):
         return None
 
@@ -273,12 +267,7 @@ def _save_cache(cache_path: Path, updates: dict[str, ExternalIds]) -> None:
 
     with _CACHE_LOCK:
         cache = _load_cache(cache_path)
-        cache.update(
-            {
-                key: f"{ids.tmdb_type}|{ids.tmdb_id}"
-                for key, ids in updates.items()
-            }
-        )
+        cache.update({key: f"{ids.tmdb_type}|{ids.tmdb_id}" for key, ids in updates.items()})
         temporary_path = None
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -455,7 +444,7 @@ def enrich_letterboxd_csv(
         .replace({"movie": "movie", "tv series": "tv"})
     )
 
-    mapped_rows = int(ratings["tmdbId"].notna().sum())
+    mapped_rows = cast(int, ratings["tmdbId"].notna().sum())
     valid_type = ratings["tmdbType"].isna() | ratings["tmdbType"].eq("movie")
     usable = ratings[
         ratings["tmdbId"].notna()
@@ -472,13 +461,12 @@ def enrich_letterboxd_csv(
             )
         if mapping_errors:
             raise LetterboxdParserError(mapping_errors[0])
-        raise LetterboxdParserError(
-            "The CSV contains no rated movies with usable TMDB IDs."
-        )
+        raise LetterboxdParserError("The CSV contains no rated movies with usable TMDB IDs.")
 
     usable["tmdbId"] = usable["tmdbId"].astype("int64")
     usable["rating"] = usable["rating"].astype("float64")
-    usable = usable.drop_duplicates(subset="tmdbId", keep="last")
+    tmdb_ids = cast(pd.Series, usable["tmdbId"])
+    usable = usable.loc[~tmdb_ids.duplicated(keep="last")]
     summary = {
         "total_rows": total_rows,
         "mapped_rows": mapped_rows,

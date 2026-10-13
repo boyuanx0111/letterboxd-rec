@@ -26,12 +26,12 @@ data/                 Local/generated data; only small required files are tracke
 
 ## Requirements
 
-- CPython 3.11 is the project default (`.python-version`). The declared TensorFlow runtime targets Python 3.11–3.12; Python 3.13+ is currently unsupported by the pinned TensorFlow release.
+- CPython 3.11 is the supported baseline (`.python-version`). Use 64-bit CPython 3.11 for local installs and Docker. Other Python versions and operating systems have not been validated.
 - Node.js and npm
 - Git LFS, to check out the tracked Parquet catalogue (see below)
 - Internet access when uploaded CSV rows need Letterboxd ID lookup
 
-Python versions and operating systems have not yet been validated in CI. TensorFlow wheel availability and behavior can vary by platform; use a supported 64-bit Python build and treat 3.11 as the baseline until 3.12 and the operating systems are verified.
+Python versions and operating systems have not yet been validated in CI. TensorFlow wheel availability and behavior can vary by platform.
 
 ## Setup
 
@@ -43,23 +43,23 @@ git clone <repository-url>
 cd letterboxd-rec
 ```
 
-Create a Python environment and install the API/recommender dependencies:
+Create a Python 3.11 environment and install the API/recommender dependencies. `requirements.txt` is the single runtime entry point; `requirements/runtime.txt` holds its pinned packages:
 
 ```bash
 python -m venv .venv
 # Windows PowerShell: .venv\Scripts\Activate.ps1
 # macOS/Linux: source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-For notebook and feature-engineering work, install the larger optional stack instead:
+For notebook and feature-engineering work, install the additional tools on top of the runtime environment:
 
 ```bash
-pip install -r requirements/notebooks.txt
+python -m pip install -r requirements/notebooks.txt
 ```
 
-`requirements/runtime.txt` pins the API and inference packages; `requirements/notebooks.txt` adds notebook packages. `requirements.txt` is the compatibility entry point for runtime installation. Pins are explicit, but this repository does not yet include a resolver-generated lock file. To refresh pins, resolve and install on Python 3.11 first, then verify the same set on each claimed Python/platform combination before changing the supported range.
+The root `requirements.txt` includes `requirements/runtime.txt`, so use it for the runtime install. The notebook file includes the runtime set and adds notebook packages. Keep Docker and local runtime installs on the same root requirements file. Pins are explicit; transitive versions are resolved by pip during installation.
 
 Install frontend dependencies:
 

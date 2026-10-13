@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 from tensorflow.keras.models import load_model
 
-
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data"
 MODEL_DIR = ROOT / "models"
@@ -54,13 +53,13 @@ def main():
     all_rows = pd.concat([train, test], ignore_index=True)
 
     user_rows = (
-        all_rows[["userId", *user_cols]]
-        .drop_duplicates("userId", keep="first")
+        all_rows.loc[:, ["userId", *user_cols]]
+        .loc[~all_rows["userId"].duplicated(keep="first")]
         .set_index("userId")
     )
     movie_rows = (
-        all_rows[["movieId", *movie_cols]]
-        .drop_duplicates("movieId", keep="first")
+        all_rows.loc[:, ["movieId", *movie_cols]]
+        .loc[~all_rows["movieId"].duplicated(keep="first")]
         .set_index("movieId")
     )
 
@@ -86,9 +85,7 @@ def main():
         pair_movies = movie_vectors[movie_pos]
         dots = np.einsum("ij,ij->i", pair_users, pair_movies)
         norms = np.linalg.norm(pair_users, axis=1) * np.linalg.norm(pair_movies, axis=1)
-        frame[FEATURE] = np.divide(
-            dots, norms, out=np.zeros_like(dots), where=norms > 0
-        )
+        frame[FEATURE] = np.divide(dots, norms, out=np.zeros_like(dots), where=norms > 0)
         if len(frame[FEATURE]) != len(frame) or not np.isfinite(frame[FEATURE]).all():
             raise ValueError("Cosine scores are misaligned or contain NaN/inf values")
         if not frame[FEATURE].between(-1.00001, 1.00001).all():

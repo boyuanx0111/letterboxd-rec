@@ -9,7 +9,7 @@ def build_user_features(ratings, movie_feature_frame):
     movie_embeddings - DataFrame containing tmdbId and ALL movie embeddings
     """
 
-    users_encoded = pd.DataFrame(index=[0])
+    users_encoded = pd.DataFrame(index=pd.RangeIndex(1))
 
     # genre avg ratings
     genre_columns = [
@@ -125,7 +125,7 @@ def build_user_features(ratings, movie_feature_frame):
     # Create user SVD features
     svd_features = pd.DataFrame(
         [avg_svd.to_numpy()],
-        columns=[f"user_svd_{i}" for i in range(150)],
+        columns=pd.Index([f"user_svd_{i}" for i in range(150)]),
         index=users_encoded.index,
     )
 

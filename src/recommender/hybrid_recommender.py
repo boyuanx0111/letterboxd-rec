@@ -238,19 +238,19 @@ def hybrid_recommend(user_ratings):
     candidate_preds_ranked = initial_rank(candidate_preds)
  
     # Movie popularity from TMDB metadata enhance
-    candidate_preds_ranked["popularity"] = (
+    candidate_preds_ranked["vote_count"] = (
         movie_feature_frame
-        .reindex(candidate_preds_ranked["tmdbId"])["movie_tmdb_564"]
+        .reindex(candidate_preds_ranked["tmdbId"])["movie_tmdb_561"]
         .to_numpy()
     )
 
-    # User's average popularity preference
-    user_popularity = user_feature_frame["user_popularity"].iloc[0]
+    # User's average vote count preference
+    user_vote_count = user_feature_frame["user_vote_count"].iloc[0]
 
     # Personalised popularity affinity
     candidate_preds_ranked["pop_affinity"] = -np.abs(
-        np.log1p(candidate_preds_ranked["popularity"].clip(lower=0))
-        - np.log1p(max(user_popularity, 0))
+        np.log1p(candidate_preds_ranked["vote_count"].clip(lower=0))
+        - np.log1p(max(user_vote_count, 0))
     )
 
     # Load collaborative filtering model
@@ -305,7 +305,7 @@ def hybrid_recommend(user_ratings):
     hybrid_preds_ranked = (
         candidate_preds_ranked
         .sort_values("hybrid_score", ascending=False)
-        .head(10)
+        .head(20)
         .reset_index(drop=True)
     )
 

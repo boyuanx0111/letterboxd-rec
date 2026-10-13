@@ -26,7 +26,7 @@ def initial_rank(user_preds):
 
     predicted_rating = user_preds["predicted_rating"]
     user_preds_ranked = user_preds.nlargest(
-        300, "predicted_rating", keep="first"
+        500, "predicted_rating", keep="first"
     ).reset_index(drop=True)
     user_preds_ranked["user_rank"] = (
         user_preds_ranked["predicted_rating"]

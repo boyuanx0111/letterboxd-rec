@@ -1,4 +1,4 @@
-﻿# API and saved-model inference dependencies. Python 3.11 is the supported baseline.
+# API and saved-model inference dependencies. Python 3.12 is the supported baseline.
 fastapi==0.123.9
 uvicorn[standard]==0.38.0
 python-multipart==0.0.32

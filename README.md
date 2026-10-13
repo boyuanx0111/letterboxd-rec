@@ -26,7 +26,7 @@ data/                 Local/generated data; only small required files are tracke
 
 ## Requirements
 
-- CPython 3.11 is the supported baseline (`.python-version`). Use 64-bit CPython 3.11 for local installs and Docker. Other Python versions and operating systems have not been validated.
+- CPython 3.12 is the supported baseline (`.python-version`). Use 64-bit CPython 3.12 for local installs and Docker. Other Python versions and operating systems have not been validated.
 - Node.js and npm
 - Git LFS, to check out the tracked Parquet catalogue (see below)
 - Internet access when uploaded CSV rows need Letterboxd ID lookup
@@ -43,7 +43,7 @@ git clone <repository-url>
 cd letterboxd-rec
 ```
 
-Create a Python 3.11 environment and install the API/recommender dependencies. `requirements.txt` is the single runtime entry point; `requirements/runtime.txt` holds its pinned packages:
+Create a Python 3.12 environment and install the API/recommender dependencies. `requirements.txt` is the single runtime entry point; `requirements/runtime.txt` holds its pinned packages:
 
 ```bash
 python -m venv .venv

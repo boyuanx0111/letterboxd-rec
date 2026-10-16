@@ -6,6 +6,9 @@ import requests
 from dotenv import load_dotenv
 
 def convert_tv_json_to_csv(file_path):
+    if os.path.isfile("letterboxd-rec\\data\\tv_recommender\\tv_series_ids.csv"):
+        print("CSV file already exists. Skipping conversion.")
+        return
     with open(file_path, 'r', encoding='utf-8') as file:
         tv_json = [json.loads(line) for line in file if line.strip()]
     tv_df = pd.DataFrame(tv_json)
@@ -35,7 +38,7 @@ def fetch_tmdb_tv(tv_id):
     return {
         "tmdb_id": data.get("id"),
         "name": data.get("name"),
-        "overview": data.get("overview"),
+        "overview": data.get("overview").replace("\n", " "),
         "first_air_date": data.get("first_air_date"),
         "creators": "|".join(creator["name"] for creator in data.get("created_by", [])),
         "genres": "|".join(genre["name"] for genre in data.get("genres", [])),
@@ -43,36 +46,48 @@ def fetch_tmdb_tv(tv_id):
         "vote_average": data.get("vote_average", 0.0),
     }
 
-def fetch_several(tv_id_path, max_workers=5):
+def fetch_several(tv_id_path, max_workers=5, batch_size=100, num_batches=None, verbose=True):
     """Fetch TV details for IDs in a CSV or JSON Lines file into a DataFrame."""
     if tv_id_path.endswith(".csv"):
         ids_df = pd.read_csv(tv_id_path)
         if "id" not in ids_df.columns:
             raise ValueError("CSV must contain an 'id' column")
         tv_ids = ids_df["id"].dropna().tolist()
-    elif tv_id_path.endswith(".json"):
-        with open(tv_id_path, "r", encoding="utf-8") as file:
-            tv_ids = [json.loads(line)["id"] for line in file if line.strip()]
     else:
-        raise ValueError("tv_id_path must point to a .csv or JSON Lines .json file")
+        raise ValueError("tv_id_path must point to a .csv file")
 
+    # Keep the first occurrence of each ID, preserving input order.
+    tv_ids = list(dict.fromkeys(tv_ids)) # Instead of using list(), this is used to remove duplicates
     results = []
+    batches_processed = 0
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(fetch_tmdb_tv, tv_id): tv_id for tv_id in tv_ids}
-        for future in as_completed(futures):
-            tv_id = futures[future]
-            try:
-                results.append(future.result())
-            except requests.RequestException as error:
-                print(f"Failed to fetch TV ID {tv_id}: {error}")
-
-    return pd.DataFrame(results)
+        for start in range(0, len(tv_ids), batch_size):
+            if num_batches is None or num_batches > 0:
+                batch = tv_ids[start:start + batch_size]
+                futures = {executor.submit(fetch_tmdb_tv, tv_id): tv_id for tv_id in batch}
+                for future in as_completed(futures):
+                    tv_id = futures[future]
+                    try:
+                        results.append(future.result())
+                    except requests.RequestException as error:
+                        print(f"Failed to fetch TV ID {tv_id}: {error}")
+                if num_batches is not None:
+                    num_batches -= 1
+                batches_processed += 1
+                if verbose:
+                    print(f"Processed batch {batches_processed}, total results: {len(results)}")
+    pd_results = pd.DataFrame(results)
+    pd_results = pd_results.sort_values(by="tmdb_id")
+    return pd_results
 
 def create_tv_data_csv(tv_id_path):
+    if os.path.isfile("letterboxd-rec\\data\\tv_recommender\\tv_series_data.csv"):
+        print("CSV file already exists. Skipping data fetching.")
+        return
     if tv_id_path.endswith('.csv'):
-        tv_data = fetch_several(tv_id_path)
+        tv_data = fetch_several(tv_id_path, max_workers=12, batch_size=100, num_batches=1)
     else:
-        raise ValueError("Convert tv_id_path to CSV first")
+        raise ValueError("Convert tv_id_path to CSV first") 
     tv_data.to_csv("letterboxd-rec\\data\\tv_recommender\\tv_series_data.csv", index=False)
 
 

@@ -80,12 +80,14 @@ def fetch_several(tv_id_path, max_workers=5, batch_size=100, num_batches=None, v
     pd_results = pd_results.sort_values(by="tmdb_id")
     return pd_results
 
-def create_tv_data_csv(tv_id_path):
+def create_tv_data_csv(tv_id_path, max_workers=5, batch_size=100, num_batches=None):
     if os.path.isfile("letterboxd-rec\\data\\tv_recommender\\tv_series_data.csv"):
         print("CSV file already exists. Skipping data fetching.")
         return
     if tv_id_path.endswith('.csv'):
-        tv_data = fetch_several(tv_id_path, max_workers=12, batch_size=100, num_batches=1)
+        tv_data = fetch_several(tv_id_path, max_workers, batch_size, num_batches)
+        print(tv_data.head())
+        print(tv_data['overview'].head())
     else:
         raise ValueError("Convert tv_id_path to CSV first") 
     tv_data.to_csv("letterboxd-rec\\data\\tv_recommender\\tv_series_data.csv", index=False)
@@ -110,4 +112,4 @@ if __name__ == "__main__":
     #tv_data = load_tv_data("letterboxd-rec\\data\\tv_recommender\\tv_series_ids.json") 
     #print(tv_data[:5])
     convert_tv_json_to_csv("letterboxd-rec\\data\\tv_recommender\\tv_series_ids.json")
-    create_tv_data_csv("letterboxd-rec\\data\\tv_recommender\\tv_series_ids.csv")
+    create_tv_data_csv("letterboxd-rec\\data\\tv_recommender\\tv_series_ids.csv", 12, 100, 1)

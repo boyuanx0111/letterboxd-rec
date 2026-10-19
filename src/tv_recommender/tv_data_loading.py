@@ -1,5 +1,6 @@
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date
 import pandas as pd
 import os
 import requests
@@ -33,7 +34,10 @@ def fetch_tmdb_tv(tv_id):
         timeout=20
     )
     response.raise_for_status()
-    data = response.json()
+    data = response.json() 
+    first_air_date = data.get("first_air_date")
+    if first_air_date and date.fromisoformat(first_air_date) > date.today():
+        return None
 
     return {
         "tmdb_id": data.get("id"),
@@ -68,7 +72,9 @@ def fetch_several(tv_id_path, max_workers=5, batch_size=100, num_batches=None, v
                 for future in as_completed(futures):
                     tv_id = futures[future]
                     try:
-                        results.append(future.result())
+                        result = future.result()
+                        if result is not None:
+                            results.append(result)
                     except requests.RequestException as error:
                         print(f"Failed to fetch TV ID {tv_id}: {error}")
                 if num_batches is not None:
@@ -112,4 +118,4 @@ if __name__ == "__main__":
     #tv_data = load_tv_data("letterboxd-rec\\data\\tv_recommender\\tv_series_ids.json") 
     #print(tv_data[:5])
     convert_tv_json_to_csv("letterboxd-rec\\data\\tv_recommender\\tv_series_ids.json")
-    create_tv_data_csv("letterboxd-rec\\data\\tv_recommender\\tv_series_ids.csv", 12, 100, 1)
+    create_tv_data_csv("letterboxd-rec\\data\\tv_recommender\\tv_series_ids.csv", 12, 100)

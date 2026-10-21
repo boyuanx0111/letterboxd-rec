@@ -74,7 +74,63 @@ def encode_vote_average(pd_tv_data):
 
 def encode_creators(pd_tv_data):
     creators_series = pd_tv_data['creators'].fillna("").str.get_dummies(sep='|').astype(int)
+
     return pd.DataFrame(creators_series, index=pd_tv_data.index)
+
+def encode_original_language(pd_tv_data):
+    """One-hot encode TMDB's original-language ISO 639-1 code."""
+    languages = pd_tv_data['original_language'].fillna("").astype(str).str.strip()
+    encoded = languages.where(languages.ne(""), other=np.nan).str.get_dummies()
+    return encoded.reindex(pd_tv_data.index).astype(int)
+
+def encode_origin_country(pd_tv_data):
+    """Multi-hot encode production-company ISO 3166-1 country codes."""
+    countries = pd_tv_data['origin_country'].fillna("").astype(str).str.strip()
+    encoded = countries.str.get_dummies(sep='|')
+    return encoded.reindex(pd_tv_data.index).astype(int)
+
+def encode_svd_metadata(pd_tv_data):
+    """Build multi-hot TV inputs with the same field prefixes as movie SVD."""
+    source_fields = {
+        "director": "creators",  # TV creator stands in for movie director.
+        "cast": "top_cast",
+        "keyword": "keywords",
+        "company": "production_companies",
+    }
+    encoded_fields = []
+    for prefix, column in source_fields.items():
+        if column not in pd_tv_data.columns:
+            raise ValueError(f"TV data is missing required SVD field: {column}")
+        values = pd_tv_data[column].fillna("").astype(str).str.get_dummies(sep="|")
+        values = values.rename(columns=lambda value: f"{prefix}_{value}")
+        encoded_fields.append(values.reindex(pd_tv_data.index, fill_value=0))
+
+    return pd.concat(encoded_fields, axis=1).astype("float32")
+
+def create_tv_svd_features(pd_tv_data, movie_svd_model, movie_svd_input_columns):
+    """Transform TV metadata with the fitted movie SVD basis.
+
+    `movie_svd_model` must be the model fitted on movie metadata, and
+    `movie_svd_input_columns` must be its exact ordered input vocabulary.
+    This makes output coordinates comparable with movie SVD vectors used by
+    the recommender's existing user vectors.
+    """
+    from scipy.sparse import csr_matrix
+
+    svd_inputs = encode_svd_metadata(pd_tv_data)
+    movie_svd_input_columns = list(movie_svd_input_columns)
+    aligned_inputs = svd_inputs.reindex(columns=movie_svd_input_columns, fill_value=0)
+    svd_values = np.asarray(
+        movie_svd_model.transform(csr_matrix(aligned_inputs.to_numpy())),
+        dtype="float32",
+    )
+    if svd_values.ndim != 2 or not np.isfinite(svd_values).all():
+        raise ValueError("Movie SVD transform returned invalid TV vectors")
+
+    columns = [f"tv_svd_{component}" for component in range(svd_values.shape[1])]
+    return pd.DataFrame(svd_values, index=pd_tv_data.index, columns=columns)
+
+
 
 if __name__ == "__main__":
     tv_data_path = "letterboxd-rec\\data\\tv_recommender\\tv_series_data.csv"
@@ -83,6 +139,10 @@ if __name__ == "__main__":
     release_decade_encoded = encode_release_decade(tv_data)
     vote_count_encoded = encode_vote_count(tv_data)
     vote_average_encoded = encode_vote_average(tv_data)
+    original_language_encoded = encode_original_language(tv_data)
+    origin_country_encoded = encode_origin_country(tv_data)
+    # Pass the fitted movie SVD model and its ordered input-column vocabulary
+    # here to produce TV vectors directly comparable with movie/user SVDs.
     #creators_encoded = encode_creators(tv_data)
     print(vote_average_encoded.head())
     print(vote_count_encoded.head())

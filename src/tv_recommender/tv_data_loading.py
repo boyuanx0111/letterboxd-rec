@@ -35,6 +35,27 @@ def fetch_tmdb_tv(tv_id):
     )
     response.raise_for_status()
     data = response.json() 
+
+    credits_response = requests.get(
+        f"{url}/credits", headers=request_headers, timeout=20
+    )
+    credits_response.raise_for_status()
+    credits = credits_response.json()
+
+    keywords_response = requests.get(
+        f"{url}/keywords", headers=request_headers, timeout=20
+    )
+    keywords_response.raise_for_status()
+    keywords = keywords_response.json()
+
+    # Keep distinct production-company ISO country codes as a pipe-delimited
+    # value that can be stored in a CSV cell.
+    origin_countries = sorted({
+        company.get("origin_country", "").strip()
+        for company in data.get("production_companies", [])
+        if company.get("origin_country", "").strip()
+    })
+
     first_air_date = data.get("first_air_date")
     if first_air_date and date.fromisoformat(first_air_date) > date.today():
         return None
@@ -42,9 +63,16 @@ def fetch_tmdb_tv(tv_id):
     return {
         "tmdb_id": data.get("id"),
         "name": data.get("name"),
-        "overview": data.get("overview").replace("\n", " "),
+        "overview": data.get("overview", "").replace("\n", " "),
         "first_air_date": data.get("first_air_date"),
+        "original_language": data.get("original_language", ""),
+        "origin_country": "|".join(origin_countries),
         "creators": "|".join(creator["name"] for creator in data.get("created_by", [])),
+        "top_cast": "|".join(person["name"] for person in credits.get("cast", [])[:10]),
+        "keywords": "|".join(keyword["name"] for keyword in keywords.get("results", [])),
+        "production_companies": "|".join(
+            company["name"] for company in data.get("production_companies", [])
+        ),
         "genres": "|".join(genre["name"] for genre in data.get("genres", [])),
         "vote_count": data.get("vote_count", 0),
         "vote_average": data.get("vote_average", 0.0),
@@ -87,16 +115,21 @@ def fetch_several(tv_id_path, max_workers=5, batch_size=100, num_batches=None, v
     return pd_results
 
 def create_tv_data_csv(tv_id_path, max_workers=5, batch_size=100, num_batches=None):
-    if os.path.isfile("letterboxd-rec\\data\\tv_recommender\\tv_series_data.csv"):
-        print("CSV file already exists. Skipping data fetching.")
-        return
+    output_path = "letterboxd-rec\\data\\tv_recommender\\tv_series_data.csv"
+    required_columns = {"creators", "top_cast", "keywords", "production_companies"}
+    if os.path.isfile(output_path):
+        existing_columns = set(pd.read_csv(output_path, nrows=0).columns)
+        if required_columns.issubset(existing_columns):
+            print("CSV file already exists. Skipping data fetching.")
+            return
+        print("Existing TV data CSV lacks SVD metadata; refreshing it.")
     if tv_id_path.endswith('.csv'):
         tv_data = fetch_several(tv_id_path, max_workers, batch_size, num_batches)
         print(tv_data.head())
         print(tv_data['overview'].head())
     else:
         raise ValueError("Convert tv_id_path to CSV first") 
-    tv_data.to_csv("letterboxd-rec\\data\\tv_recommender\\tv_series_data.csv", index=False)
+    tv_data.to_csv(output_path, index=False)
 
 
 def join_tv_show_data(tv_id_path, tv_data_path):
